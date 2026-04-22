@@ -35,6 +35,7 @@ public sealed interface Request {
     // --- Project Config ---
     record GetClasspath(String project) implements Request {}
     record GetProjectDescription(String project) implements Request {}
+    record RefreshProject(String project) implements Request {}
 
     /**
      * Types of stepping available.

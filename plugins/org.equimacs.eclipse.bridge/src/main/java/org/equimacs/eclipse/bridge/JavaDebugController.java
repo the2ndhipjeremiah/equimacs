@@ -307,6 +307,18 @@ public class JavaDebugController {
         return result;
     }
 
+    public String refreshProject(String projectName) throws CoreException {
+        IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
+        if (!project.exists()) throw new CoreException(new org.eclipse.core.runtime.Status(
+            org.eclipse.core.runtime.Status.ERROR, Activator.PLUGIN_ID, "Project not found: " + projectName));
+        NullProgressMonitor monitor = new NullProgressMonitor();
+        project.refreshLocal(IResource.DEPTH_INFINITE, monitor);
+        // Re-apply the project description to force nature re-validation
+        org.eclipse.core.resources.IProjectDescription desc = project.getDescription();
+        project.setDescription(desc, monitor);
+        return "Refreshed: " + projectName;
+    }
+
     public Map<String, Object> getProjectDescription(String projectName) throws CoreException {
         IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
         if (!project.exists()) throw new CoreException(new org.eclipse.core.runtime.Status(

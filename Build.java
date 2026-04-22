@@ -30,7 +30,8 @@ public class Build {
             buildBridge();
             buildCLI();
             buildMgr();
-            
+            packageAll();
+
             copyToDropins();
             
             System.out.println(">>> Build Successful");
@@ -47,7 +48,7 @@ public class Build {
             Path out = ROOT.resolve("libs/cli/build/classes");
             if (Files.exists(out)) deleteDir(out);
             Files.createDirectories(out);
-            runProcess(List.of(getJavac(), "-d", out.toString(), "--release", "21",
+            runProcess(List.of(getJavac(), "-d", out.toString(), "--release", "25",
                 src.resolve("org/equimacs/cli/util/CliArgs.java").toString()));
         });
     }
@@ -59,7 +60,7 @@ public class Build {
             if (Files.exists(out)) deleteDir(out);
             Files.createDirectories(out);
 
-            runProcess(List.of(getJavac(), "-d", out.toString(), "--release", "21",
+            runProcess(List.of(getJavac(), "-d", out.toString(), "--release", "25",
                 src.resolve("org/equimacs/protocol/ProtocolSchema.java").toString(),
                 src.resolve("org/equimacs/protocol/Request.java").toString(),
                 src.resolve("org/equimacs/protocol/Response.java").toString()));
@@ -84,7 +85,7 @@ public class Build {
             cp += File.pathSeparator + ROOT.resolve("libs/cli/build/classes");
             cp += File.pathSeparator + getLib("gson");
 
-            List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "21"));
+            List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "25"));
             try (Stream<Path> s = Files.walk(src)) {
                 s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
             }
@@ -106,7 +107,7 @@ public class Build {
             String cp = ROOT.resolve("libs/protocol/build/libs/protocol.jar") + 
                         File.pathSeparator + ROOT.resolve("libs/cli/build/classes") + 
                         File.pathSeparator + getLib("gson");
-            runProcess(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "21",
+            runProcess(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "25",
                 src.resolve("org/equimacs/cli/EquimacsCLI.java").toString()));
         });
     }
@@ -119,7 +120,7 @@ public class Build {
             Files.createDirectories(out);
 
             String cp = ROOT.resolve("libs/cli/build/classes") + File.pathSeparator + getLib("gson");
-            runProcess(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "21",
+            runProcess(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "25",
                 src.resolve("org/equimacs/mgr/EquimacsMgr.java").toString()));
         });
     }
@@ -133,6 +134,104 @@ public class Build {
                     Files.copy(in, dest, StandardCopyOption.REPLACE_EXISTING);
                 }
             }
+        }
+    }
+
+    private static void packageAll() throws Exception {
+        step("package", () -> {
+            if (JAVA_HOME == null) { System.out.println("  [package] skipped: JAVA_HOME not set"); return; }
+            Path jpackage = Path.of(JAVA_HOME, "bin/jpackage.exe");
+            if (!Files.exists(jpackage)) jpackage = Path.of(JAVA_HOME, "bin/jpackage");
+            if (!Files.exists(jpackage)) { System.out.println("  [package] skipped: jpackage not found in " + JAVA_HOME); return; }
+
+            Path gsonJar   = ROOT.resolve("lib/gson.jar");
+            Path cliLibOut = ROOT.resolve("libs/cli/build/classes");
+
+            packageApp("eqmcli", "org.equimacs.cli.EquimacsCLI",
+                ROOT.resolve("tools/cli/build"),
+                List.of(ROOT.resolve("tools/cli/build/classes"),
+                        ROOT.resolve("libs/protocol/build/classes"),
+                        cliLibOut),
+                gsonJar);
+
+            packageApp("eqmgr", "org.equimacs.mgr.EquimacsMgr",
+                ROOT.resolve("tools/mgr/build"),
+                List.of(ROOT.resolve("tools/mgr/build/classes"), cliLibOut),
+                gsonJar);
+        });
+    }
+
+    private static void packageApp(String name, String mainClass, Path buildDir, List<Path> classDirs, Path gsonJar) throws Exception {
+        Path libsDir    = buildDir.resolve("libs");
+        Path appOutBase = buildDir.resolve("app");
+        Path tmpExplode = buildDir.resolve("tmp_explode");
+        Path fatJar     = libsDir.resolve(name + "-fat.jar");
+        Path finalApp   = appOutBase.resolve(name);
+
+        deleteDir(libsDir);
+        Files.createDirectories(libsDir);
+        Files.createDirectories(appOutBase);
+
+        // Clean up stale jpackage temp dirs from previous failed runs
+        try (var s = Files.list(appOutBase)) {
+            s.filter(p -> p.getFileName().toString().startsWith("jpackage-") ||
+                          p.getFileName().toString().startsWith(name + ".old."))
+             .forEach(p -> { try { deleteDir(p); } catch (IOException ignored) {} });
+        }
+
+        Path oldApp      = appOutBase.resolve(name + ".old." + System.currentTimeMillis());
+        Path jpackageTemp = null;
+        boolean renamedOld = false;
+        try {
+            // Build fat JAR: explode gson + all class dirs
+            deleteDir(tmpExplode);
+            Files.createDirectories(tmpExplode);
+            runProcess(List.of(getJar(), "xf", gsonJar.toString()), tmpExplode);
+
+            List<String> jarCmd = new ArrayList<>(List.of(
+                getJar(), "--create", "--file", fatJar.toString(), "--main-class", mainClass));
+            for (Path dir : classDirs) jarCmd.addAll(List.of("-C", dir.toString(), "."));
+            jarCmd.addAll(List.of("-C", tmpExplode.toString(), "."));
+            runProcess(jarCmd, ROOT);
+
+            // jpackage into a temp dir; only swap if successful
+            jpackageTemp = Files.createTempDirectory(appOutBase, "jpackage-");
+            runProcess(List.of(
+                Path.of(JAVA_HOME, "bin/jpackage").toString(),
+                "--type", "app-image",
+                "--dest", jpackageTemp.toString(),
+                "--name", name,
+                "--main-jar", fatJar.getFileName().toString(),
+                "--input", libsDir.toString(),
+                "--main-class", mainClass,
+                "--vendor", "Equimacs"
+            ), ROOT);
+
+            verifyAppImage(jpackageTemp.resolve(name), name);
+
+            if (Files.exists(finalApp)) { Files.move(finalApp, oldApp); renamedOld = true; }
+            Files.move(jpackageTemp.resolve(name), finalApp);
+            renamedOld = false;
+
+        } catch (Exception e) {
+            if (renamedOld && !Files.exists(finalApp)) {
+                try { Files.move(oldApp, finalApp); } catch (IOException ignored) {}
+            }
+            throw e;
+        } finally {
+            try { deleteDir(tmpExplode); } catch (IOException ignored) {}
+            if (jpackageTemp != null) try { deleteDir(jpackageTemp); } catch (IOException ignored) {}
+            if (!renamedOld)          try { deleteDir(oldApp);       } catch (IOException ignored) {}
+        }
+
+        verifyAppImage(finalApp, name);
+        System.out.println("  [package] " + finalApp.resolve(name + ".exe"));
+    }
+
+    private static void verifyAppImage(Path appDir, String name) {
+        for (String entry : new String[]{ name + ".exe", "app", "runtime" }) {
+            if (!Files.exists(appDir.resolve(entry)))
+                throw new RuntimeException("Incomplete app image at " + appDir + ": missing " + entry);
         }
     }
 
@@ -244,7 +343,9 @@ public class Build {
     private static void ensureLibDir() throws IOException { Files.createDirectories(ROOT.resolve("lib")); }
     private static void deleteDir(Path p) throws IOException {
         if (!Files.exists(p)) return;
-        try (var s = Files.walk(p)) { s.sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(File::delete); }
+        try (var s = Files.walk(p)) {
+            s.sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(f -> { f.setWritable(true); f.delete(); });
+        }
     }
 
     @FunctionalInterface interface Task { void run() throws Exception; }

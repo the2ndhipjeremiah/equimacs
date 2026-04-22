@@ -3,7 +3,7 @@ Bundle-Version: 1.0.0.qualifier
 Bundle-Activator: org.equimacs.eclipse.bridge.Activator
 Eclipse-BundleShape: dir
 
-Bundle-RequiredExecutionEnvironment: JavaSE-21
+Bundle-RequiredExecutionEnvironment: JavaSE-25
 
 # Include our compiled classes and resources
 -includeresource: \

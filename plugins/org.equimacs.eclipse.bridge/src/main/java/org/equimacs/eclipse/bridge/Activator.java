@@ -58,6 +58,7 @@ public class Activator extends AbstractUIPlugin {
                 case "ApplyFix" -> context.deserialize(obj, Request.ApplyFix.class);
                 case "GetClasspath" -> context.deserialize(obj, Request.GetClasspath.class);
                 case "GetProjectDescription" -> context.deserialize(obj, Request.GetProjectDescription.class);
+                case "RefreshProject" -> context.deserialize(obj, Request.RefreshProject.class);
                 default -> throw new JsonParseException("Unknown request type: " + type);
             };
         })
@@ -194,16 +195,16 @@ public class Activator extends AbstractUIPlugin {
                     yield "Breakpoint set at " + b.path() + ":" + b.line() + 
                           (b.condition() != null ? " with condition: " + b.condition() : "");
                 }
-                case Request.ListBreakpoints l -> controller.listBreakpoints();
-                case Request.ClearAllBreakpoints c -> {
+                case Request.ListBreakpoints _ -> controller.listBreakpoints();
+                case Request.ClearAllBreakpoints _ -> {
                     controller.clearAllBreakpoints();
                     yield "All breakpoints cleared";
                 }
-                case Request.Resume r -> {
+                case Request.Resume _ -> {
                     controller.resume();
                     yield "Resumed";
                 }
-                case Request.Suspend s -> {
+                case Request.Suspend _ -> {
                     controller.suspend();
                     yield "Suspended";
                 }
@@ -216,7 +217,7 @@ public class Activator extends AbstractUIPlugin {
                     yield "Step executed";
                 }
                 case Request.GogoExec g -> controller.executeGogo(g.command(), bundleContext);
-                case Request.Reload ignored -> {
+                case Request.Reload _ -> {
                     Bundle self = bundleContext.getBundle();
                     Bundle system = bundleContext.getBundle(0);
                     new Thread(() -> {
@@ -230,8 +231,8 @@ public class Activator extends AbstractUIPlugin {
                     }, "equimacs-reload").start();
                     yield "Reloading... [" + java.time.LocalTime.now().withNano(0) + "]";
                 }
-                case Request.GetWorkspace w -> controller.getWorkspace();
-                case Request.GetThreads t -> controller.getThreads();
+                case Request.GetWorkspace _ -> controller.getWorkspace();
+                case Request.GetThreads _ -> controller.getThreads();
                 case Request.GetStack s -> controller.getStack(s.threadId());
                 case Request.GetVariables v -> controller.getVariables(v.frameId());
                 case Request.GetProblems p -> controller.getProblems(p.project(), p.severity());
@@ -240,6 +241,7 @@ public class Activator extends AbstractUIPlugin {
                 case Request.ApplyFix a -> controller.applyFix(a.file(), a.line(), a.fixIndex());
                 case Request.GetClasspath c -> controller.getClasspath(c.project());
                 case Request.GetProjectDescription d -> controller.getProjectDescription(d.project());
+                case Request.RefreshProject r -> controller.refreshProject(r.project());
             };
             return new Response.Success(result);
         } catch (Exception e) {

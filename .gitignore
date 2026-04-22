@@ -17,6 +17,10 @@
 RemoteSystemsTempFiles/
 .recommenders/
 
+# Eclipse per-project generated settings (not the .project/.classpath we commit)
+**/.settings/
+**/bin/
+
 # OS specific
 Thumbs.db
 .DS_Store

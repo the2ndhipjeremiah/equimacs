@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <projectDescription>
-	<name>org.equimacs.eclipse.bridge</name>
+	<name>equimacs.cli-lib</name>
 	<comment></comment>
 	<projects>
-		<project>equimacs.protocol</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>
@@ -11,14 +10,8 @@
 			<arguments>
 			</arguments>
 		</buildCommand>
-		<buildCommand>
-			<name>org.eclipse.pde.core.pdeincrementalbuilder</name>
-			<arguments>
-			</arguments>
-		</buildCommand>
 	</buildSpec>
 	<natures>
-		<nature>org.eclipse.pde.core.pdeplugin</nature>
 		<nature>org.eclipse.jdt.core.javanature</nature>
 	</natures>
 </projectDescription>

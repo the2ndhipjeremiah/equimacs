@@ -90,6 +90,10 @@ public class EquimacsCLI {
                     if (args.size() < 2) exitWithError("Usage: describe <project>");
                     yield new Request.GetProjectDescription(args.get(1));
                 }
+                case "refresh" -> {
+                    if (args.size() < 2) exitWithError("Usage: refresh <project>");
+                    yield new Request.RefreshProject(args.get(1));
+                }
                 case "quickfixes" -> {
                     if (args.size() < 2) exitWithError("Usage: quickfixes <file>:<line>");
                     String spec = args.get(1);
