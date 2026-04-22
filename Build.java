@@ -76,9 +76,14 @@ public class Build {
         step("bridge", () -> {
             Path bridgeDir = ROOT.resolve("plugins/org.equimacs.eclipse.bridge");
             Path src = bridgeDir.resolve("src/main/java");
+            Path generated = bridgeDir.resolve("build/generated-src");
             Path out = bridgeDir.resolve("build/classes");
             if (Files.exists(out)) deleteDir(out);
             Files.createDirectories(out);
+            if (Files.exists(generated)) deleteDir(generated);
+            Files.createDirectories(generated);
+
+            writeBridgeBuildInfo(generated);
 
             String cp = findEclipseJars();
             cp += File.pathSeparator + ROOT.resolve("libs/protocol/build/libs/protocol.jar");
@@ -89,12 +94,31 @@ public class Build {
             try (Stream<Path> s = Files.walk(src)) {
                 s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
             }
+            try (Stream<Path> s = Files.walk(generated)) {
+                s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
+            }
             runProcess(javacCmd);
 
             // Bnd Packaging
             Path bndJar = Path.of(getLib("bnd"));
             runProcess(List.of(getJava(), "-jar", bndJar.toAbsolutePath().toString(), "buildx", "bnd.bnd"), bridgeDir);
         });
+    }
+
+    private static void writeBridgeBuildInfo(Path generatedRoot) throws IOException {
+        Path pkgDir = generatedRoot.resolve("org/equimacs/eclipse/bridge");
+        Files.createDirectories(pkgDir);
+        String stamp = java.time.ZonedDateTime.now().withNano(0).toString();
+        String content = """
+            package org.equimacs.eclipse.bridge;
+
+            final class BuildInfo {
+                static final String BUILD_STAMP = "%s";
+
+                private BuildInfo() {}
+            }
+            """.formatted(stamp);
+        Files.writeString(pkgDir.resolve("BuildInfo.java"), content);
     }
 
     private static void buildCLI() throws Exception {
@@ -147,6 +171,8 @@ public class Build {
             Path gsonJar   = ROOT.resolve("lib/gson.jar");
             Path cliLibOut = ROOT.resolve("libs/cli/build/classes");
 
+            cleanLegacyCliPackageArtifacts(ROOT.resolve("tools/cli/build"));
+
             packageApp("eqm-cli", "org.equimacs.cli.EquimacsCLI",
                 ROOT.resolve("tools/cli/build"),
                 List.of(ROOT.resolve("tools/cli/build/classes"),
@@ -159,6 +185,18 @@ public class Build {
                 List.of(ROOT.resolve("tools/mgr/build/classes"), cliLibOut),
                 gsonJar);
         });
+    }
+
+    private static void cleanLegacyCliPackageArtifacts(Path buildDir) throws IOException {
+        Path appOutBase = buildDir.resolve("app");
+        Path libsDir = buildDir.resolve("libs");
+
+        for (String legacyAppName : List.of("eqm", "eqmcli", "equimacs")) {
+            deleteDir(appOutBase.resolve(legacyAppName));
+        }
+        for (String legacyJarName : List.of("eqm-fat.jar", "eqmcli-fat.jar", "equimacs-fat.jar")) {
+            Files.deleteIfExists(libsDir.resolve(legacyJarName));
+        }
     }
 
     private static void packageApp(String name, String mainClass, Path buildDir, List<Path> classDirs, Path gsonJar) throws Exception {

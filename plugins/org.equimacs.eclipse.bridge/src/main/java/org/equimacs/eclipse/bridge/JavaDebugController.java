@@ -23,6 +23,7 @@ import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IncrementalProjectBuilder;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.NullProgressMonitor;
+import org.eclipse.core.runtime.IStatus;
 import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.JavaCore;
@@ -51,6 +52,7 @@ import org.eclipse.jdt.debug.core.IJavaStackFrame;
 import org.eclipse.jdt.debug.core.JDIDebugModel;
 
 public class JavaDebugController {
+    private static final NullProgressMonitor NULL_MONITOR = new NullProgressMonitor();
 
     private final Map<Long, IThread> threadRegistry = new ConcurrentHashMap<>();
     private final Map<Long, IStackFrame> frameRegistry = new ConcurrentHashMap<>();
@@ -88,9 +90,7 @@ public class JavaDebugController {
     // --- Breakpoints ---
 
     public void setBreakpoint(String filePath, int lineNumber, String condition) throws CoreException {
-        IResource resource = resolveResource(filePath);
-        if (resource == null) throw new CoreException(new Status(Status.ERROR, Activator.PLUGIN_ID,
-            "Resource not found in workspace: " + filePath));
+        IResource resource = requireResource(filePath, "Resource not found in workspace: " + filePath);
 
         String typeName = resolveJavaTypeName(resource);
         IJavaLineBreakpoint bp = JDIDebugModel.createLineBreakpoint(resource, typeName, lineNumber, -1, -1, 0, true, null);
@@ -189,8 +189,7 @@ public class JavaDebugController {
 
     public List<Map<String, Object>> getStack(long threadId) throws CoreException {
         IThread thread = threadRegistry.get(threadId);
-        if (thread == null) throw new CoreException(new Status(Status.ERROR, Activator.PLUGIN_ID,
-            "Thread not found: " + threadId + " — call 'threads' first"));
+        if (thread == null) throw error("Thread not found: " + threadId + " — call 'threads' first");
         frameRegistry.clear();
         List<Map<String, Object>> result = new ArrayList<>();
         for (IStackFrame frame : thread.getStackFrames()) {
@@ -211,8 +210,7 @@ public class JavaDebugController {
 
     public List<Map<String, Object>> getVariables(long frameId) throws CoreException {
         IStackFrame frame = frameRegistry.get(frameId);
-        if (frame == null) throw new CoreException(new Status(Status.ERROR, Activator.PLUGIN_ID,
-            "Frame not found: " + frameId + " — call 'stack' first"));
+        if (frame == null) throw error("Frame not found: " + frameId + " — call 'stack' first");
         List<Map<String, Object>> result = new ArrayList<>();
         for (IVariable var : frame.getVariables()) {
             Map<String, Object> info = new HashMap<>();
@@ -286,22 +284,17 @@ public class JavaDebugController {
                     String label = res.getLabel();
                     IMarker targetMarker = marker;
                     Display display = Display.getDefault();
-                    if (display == null) throw new CoreException(new org.eclipse.core.runtime.Status(
-                        org.eclipse.core.runtime.Status.ERROR, Activator.PLUGIN_ID, "No SWT Display available"));
+                    if (display == null) throw error("No SWT Display available");
                     display.syncExec(() -> res.run(targetMarker));
                     return "Applied fix [" + fixIndex + "]: " + label;
                 }
             }
         }
-        throw new CoreException(new org.eclipse.core.runtime.Status(
-            org.eclipse.core.runtime.Status.ERROR, Activator.PLUGIN_ID,
-            "No fix at index " + fixIndex + " — call quickfixes first"));
+        throw error("No fix at index " + fixIndex + " — call quickfixes first");
     }
 
     private IMarker[] findMarkersAtLine(String filePath, int line) throws CoreException {
-        IResource resource = resolveResource(filePath);
-        if (resource == null) throw new CoreException(new org.eclipse.core.runtime.Status(
-            org.eclipse.core.runtime.Status.ERROR, Activator.PLUGIN_ID, "Resource not found: " + filePath));
+        IResource resource = requireResource(filePath, "Resource not found: " + filePath);
         IMarker[] all = resource.findMarkers(IMarker.PROBLEM, true, IResource.DEPTH_ZERO);
         List<IMarker> atLine = new ArrayList<>();
         for (IMarker m : all) {
@@ -313,13 +306,7 @@ public class JavaDebugController {
     // --- Project Config ---
 
     public Map<String, Object> getClasspath(String projectName) throws CoreException {
-        IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
-        if (!project.exists()) throw new CoreException(new org.eclipse.core.runtime.Status(
-            org.eclipse.core.runtime.Status.ERROR, Activator.PLUGIN_ID, "Project not found: " + projectName));
-        if (!project.hasNature(JavaCore.NATURE_ID)) throw new CoreException(new org.eclipse.core.runtime.Status(
-            org.eclipse.core.runtime.Status.ERROR, Activator.PLUGIN_ID, "Not a Java project: " + projectName));
-
-        IJavaProject javaProject = JavaCore.create(project);
+        IJavaProject javaProject = requireJavaProject(projectName);
         List<Map<String, Object>> entries = new ArrayList<>();
         for (IClasspathEntry entry : javaProject.getRawClasspath()) {
             Map<String, Object> info = new HashMap<>();
@@ -344,21 +331,16 @@ public class JavaDebugController {
     }
 
     public String refreshProject(String projectName) throws CoreException {
-        IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
-        if (!project.exists()) throw new CoreException(new org.eclipse.core.runtime.Status(
-            org.eclipse.core.runtime.Status.ERROR, Activator.PLUGIN_ID, "Project not found: " + projectName));
-        NullProgressMonitor monitor = new NullProgressMonitor();
-        project.refreshLocal(IResource.DEPTH_INFINITE, monitor);
+        IProject project = requireProject(projectName);
+        project.refreshLocal(IResource.DEPTH_INFINITE, NULL_MONITOR);
         // Re-apply the project description to force nature re-validation
         org.eclipse.core.resources.IProjectDescription desc = project.getDescription();
-        project.setDescription(desc, monitor);
+        project.setDescription(desc, NULL_MONITOR);
         return "Refreshed: " + projectName;
     }
 
     public Map<String, Object> getProjectDescription(String projectName) throws CoreException {
-        IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
-        if (!project.exists()) throw new CoreException(new org.eclipse.core.runtime.Status(
-            org.eclipse.core.runtime.Status.ERROR, Activator.PLUGIN_ID, "Project not found: " + projectName));
+        IProject project = requireProject(projectName);
 
         org.eclipse.core.resources.IProjectDescription desc = project.getDescription();
         Map<String, Object> result = new HashMap<>();
@@ -391,15 +373,11 @@ public class JavaDebugController {
             case "auto"  -> IncrementalProjectBuilder.AUTO_BUILD;
             default      -> IncrementalProjectBuilder.INCREMENTAL_BUILD;
         };
-        NullProgressMonitor monitor = new NullProgressMonitor();
         if (project != null && !project.isBlank()) {
-            IProject proj = ResourcesPlugin.getWorkspace().getRoot().getProject(project);
-            if (!proj.exists()) throw new CoreException(new org.eclipse.core.runtime.Status(
-                org.eclipse.core.runtime.Status.ERROR, Activator.PLUGIN_ID, "Project not found: " + project));
-            proj.build(buildKind, monitor);
+            requireProject(project).build(buildKind, NULL_MONITOR);
             return "Build complete: " + project;
         }
-        ResourcesPlugin.getWorkspace().build(buildKind, monitor);
+        ResourcesPlugin.getWorkspace().build(buildKind, NULL_MONITOR);
         return "Workspace build complete";
     }
 
@@ -425,8 +403,7 @@ public class JavaDebugController {
                 return "launched: " + configName;
             }
         }
-        throw new CoreException(new Status(Status.ERROR, Activator.PLUGIN_ID,
-            "No launch config found: " + configName));
+        throw error("No launch config found: " + configName);
     }
 
     public List<String> listLaunches() throws CoreException {
@@ -532,6 +509,30 @@ public class JavaDebugController {
         return resources.length > 0 ? resources[0] : null;
     }
 
+    private IResource requireResource(String pathStr, String message) throws CoreException {
+        IResource resource = resolveResource(pathStr);
+        if (resource == null) {
+            throw error(message);
+        }
+        return resource;
+    }
+
+    private IProject requireProject(String projectName) throws CoreException {
+        IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
+        if (!project.exists()) {
+            throw error("Project not found: " + projectName);
+        }
+        return project;
+    }
+
+    private IJavaProject requireJavaProject(String projectName) throws CoreException {
+        IProject project = requireProject(projectName);
+        if (!project.hasNature(JavaCore.NATURE_ID)) {
+            throw error("Not a Java project: " + projectName);
+        }
+        return JavaCore.create(project);
+    }
+
     private String resolveJavaTypeName(IResource resource) {
         org.eclipse.jdt.core.IJavaElement element = org.eclipse.jdt.core.JavaCore.create(resource);
         if (element instanceof org.eclipse.jdt.core.ICompilationUnit cu) {
@@ -568,6 +569,10 @@ public class JavaDebugController {
                 }
             }
         }
+    }
+
+    private CoreException error(String message) {
+        return new CoreException(new Status(IStatus.ERROR, Activator.PLUGIN_ID, message));
     }
 
     @FunctionalInterface interface TargetAction { void run(IDebugTarget target) throws CoreException; }

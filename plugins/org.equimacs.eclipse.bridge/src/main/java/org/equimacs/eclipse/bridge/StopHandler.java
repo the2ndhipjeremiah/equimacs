@@ -16,7 +16,7 @@ public class StopHandler extends AbstractHandler {
                 MessageDialog.openInformation(
                     HandlerUtil.getActiveShell(event),
                     "Equimacs Bridge",
-                    "Equimacs bridge stopped."
+                    "Equimacs bridge stopped.\n" + Activator.buildBanner()
                 );
             }
         } catch (Exception e) {

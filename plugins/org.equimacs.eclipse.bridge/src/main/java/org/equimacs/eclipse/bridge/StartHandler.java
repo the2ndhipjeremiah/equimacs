@@ -20,23 +20,33 @@ public class StartHandler extends AbstractHandler {
 
             Activator activator = Activator.getDefault();
             if (activator != null) {
+                boolean wasRunning = activator.isServerRunning();
+                if (wasRunning) {
+                    activator.stopServer();
+                }
+
+                activator.startServer();
+                String userHome = System.getProperty("user.home");
+                String socketPath = userHome + "/.equimacs.sock";
                 if (activator.isServerRunning()) {
                     MessageDialog.openInformation(
                         HandlerUtil.getActiveShell(event),
                         "Equimacs Bridge",
-                        "Equimacs bridge is already running."
+                        (wasRunning
+                            ? "Equimacs bridge restarted and is listening on Unix socket: "
+                            : "Equimacs bridge started listening on Unix socket: ")
+                            + socketPath
+                            + "\n" + Activator.buildBanner()
                     );
-                    return null;
+                } else {
+                    MessageDialog.openError(
+                        HandlerUtil.getActiveShell(event),
+                        "Equimacs Bridge Error",
+                        "Equimacs bridge did not start listening on Unix socket: " + socketPath
+                            + "\n" + Activator.buildBanner()
+                            + "\nCheck the Eclipse Error Log for the underlying failure."
+                    );
                 }
-                
-                activator.startServer();
-                String userHome = System.getProperty("user.home");
-                String socketPath = userHome + "/.equimacs.sock";
-                MessageDialog.openInformation(
-                    HandlerUtil.getActiveShell(event),
-                    "Equimacs Bridge",
-                    "Equimacs bridge started listening on Unix socket: " + socketPath
-                );
             } else {
                 MessageDialog.openError(
                     HandlerUtil.getActiveShell(event),
