@@ -1,5 +1,7 @@
 # Equimacs
 
+> **Status: experimental / unstable.** APIs, command names, and the wire protocol may change without notice. Not ready for production use.
+
 Equimacs is a local bridge between Eclipse and external tools. It consists of:
 
 - an Eclipse plugin that listens on `~/.equimacs.sock`
