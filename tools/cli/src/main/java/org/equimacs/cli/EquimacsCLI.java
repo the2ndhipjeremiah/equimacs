@@ -35,8 +35,7 @@ public class EquimacsCLI {
             return;
         }
 
-        String condition = cli.getOption("condition", "c");
-        Request request = parseCommand(cli.positional(), condition);
+        Request request = parseCommand(cli);
         if (request == null) return;
 
         try {
@@ -47,7 +46,8 @@ public class EquimacsCLI {
         }
     }
 
-    private static Request parseCommand(List<String> args, String condition) {
+    private static Request parseCommand(CliArgs cli) {
+        List<String> args = cli.positional();
         String cmd = args.get(0).toLowerCase();
         try {
             return switch (cmd) {
@@ -59,7 +59,7 @@ public class EquimacsCLI {
                     yield new Request.SetBreakpoint(
                         spec.substring(0, lastColon),
                         Integer.parseInt(spec.substring(lastColon + 1)),
-                        condition);
+                        cli.getOption("condition", "c"));
                 }
                 case "list", "bps" -> new Request.ListBreakpoints();
                 case "clear" -> new Request.ClearAllBreakpoints();
@@ -67,9 +67,7 @@ public class EquimacsCLI {
                 case "suspend" -> new Request.Suspend();
                 case "step" -> {
                     Request.StepType type = Request.StepType.OVER;
-                    if (args.size() > 1) {
-                        type = Request.StepType.valueOf(args.get(1).toUpperCase());
-                    }
+                    if (args.size() > 1) type = Request.StepType.valueOf(args.get(1).toUpperCase());
                     yield new Request.Step(type);
                 }
                 case "gogo" -> {
@@ -77,6 +75,40 @@ public class EquimacsCLI {
                     yield new Request.GogoExec(String.join(" ", args.subList(1, args.size())));
                 }
                 case "reload" -> new Request.Reload();
+                case "workspace" -> new Request.GetWorkspace();
+                case "problems" -> new Request.GetProblems(
+                    args.size() > 1 ? args.get(1) : null,
+                    cli.getOption("severity", "s"));
+                case "build" -> new Request.Build(
+                    args.size() > 1 ? args.get(1) : null,
+                    cli.getOption("kind", "k"));
+                case "classpath" -> {
+                    if (args.size() < 2) exitWithError("Usage: classpath <project>");
+                    yield new Request.GetClasspath(args.get(1));
+                }
+                case "describe" -> {
+                    if (args.size() < 2) exitWithError("Usage: describe <project>");
+                    yield new Request.GetProjectDescription(args.get(1));
+                }
+                case "quickfixes" -> {
+                    if (args.size() < 2) exitWithError("Usage: quickfixes <file>:<line>");
+                    String spec = args.get(1);
+                    int lastColon = spec.lastIndexOf(':');
+                    if (lastColon <= 0) exitWithError("Usage: quickfixes <file>:<line>");
+                    yield new Request.GetQuickFixes(
+                        spec.substring(0, lastColon),
+                        Integer.parseInt(spec.substring(lastColon + 1)));
+                }
+                case "applyfix" -> {
+                    if (args.size() < 3) exitWithError("Usage: applyfix <file>:<line> <index>");
+                    String spec = args.get(1);
+                    int lastColon = spec.lastIndexOf(':');
+                    if (lastColon <= 0) exitWithError("Usage: applyfix <file>:<line> <index>");
+                    yield new Request.ApplyFix(
+                        spec.substring(0, lastColon),
+                        Integer.parseInt(spec.substring(lastColon + 1)),
+                        Integer.parseInt(args.get(2)));
+                }
                 case "threads" -> new Request.GetThreads();
                 case "stack" -> {
                     if (args.size() < 2) exitWithError("Usage: stack <threadId>");

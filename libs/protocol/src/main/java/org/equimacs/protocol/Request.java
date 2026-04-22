@@ -27,6 +27,14 @@ public sealed interface Request {
     record GetThreads() implements Request {}
     record GetStack(long threadId) implements Request {}
     record GetVariables(long frameId) implements Request {}
+    record GetProblems(String project, String severity) implements Request {}
+    record Build(String project, String kind) implements Request {}
+    record GetQuickFixes(String file, int line) implements Request {}
+    record ApplyFix(String file, int line, int fixIndex) implements Request {}
+
+    // --- Project Config ---
+    record GetClasspath(String project) implements Request {}
+    record GetProjectDescription(String project) implements Request {}
 
     /**
      * Types of stepping available.

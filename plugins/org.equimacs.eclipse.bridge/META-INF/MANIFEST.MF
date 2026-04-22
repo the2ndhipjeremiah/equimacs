@@ -5,6 +5,7 @@ Bundle-SymbolicName: org.equimacs.eclipse.bridge;singleton:=true
 Bundle-Version: 1.0.0.qualifier
 Bundle-Activator: org.equimacs.eclipse.bridge.Activator
 Require-Bundle: org.eclipse.ui,
+ org.eclipse.ui.ide,
  org.eclipse.core.runtime,
  org.eclipse.debug.core,
  org.eclipse.jdt.debug,

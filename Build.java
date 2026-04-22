@@ -160,7 +160,7 @@ public class Build {
             "org.eclipse.core.commands_", "org.eclipse.jface_", "org.eclipse.ui.workbench_", "org.eclipse.swt_",
             "org.eclipse.core.jobs_", "org.eclipse.equinox.registry_", "org.eclipse.equinox.preferences_",
             "org.eclipse.core.contenttype_", "org.eclipse.swt.win32.win32.x86_64_",
-            "org.apache.felix.gogo.runtime_" };
+            "org.apache.felix.gogo.runtime_", "org.eclipse.ui.ide_" };
         
         List<String> found = new ArrayList<>();
         try (Stream<Path> stream = Files.list(plugins)) {

@@ -16,6 +16,7 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -31,7 +32,7 @@ import org.osgi.framework.wiring.FrameworkWiring;
 public class Activator extends AbstractUIPlugin {
     public static final String PLUGIN_ID = "org.equimacs.eclipse.bridge";
     private static Activator plugin;
-    private final DebugController controller = new DebugController();
+    private final JavaDebugController controller = new JavaDebugController();
     private org.osgi.framework.BundleContext bundleContext;
     private final Gson gson = new GsonBuilder()
         .registerTypeAdapter(Request.class, (JsonDeserializer<Request>) (json, typeOfT, context) -> {
@@ -51,6 +52,12 @@ public class Activator extends AbstractUIPlugin {
                 case "GetThreads" -> context.deserialize(obj, Request.GetThreads.class);
                 case "GetStack" -> context.deserialize(obj, Request.GetStack.class);
                 case "GetVariables" -> context.deserialize(obj, Request.GetVariables.class);
+                case "GetProblems" -> context.deserialize(obj, Request.GetProblems.class);
+                case "Build" -> context.deserialize(obj, Request.Build.class);
+                case "GetQuickFixes" -> context.deserialize(obj, Request.GetQuickFixes.class);
+                case "ApplyFix" -> context.deserialize(obj, Request.ApplyFix.class);
+                case "GetClasspath" -> context.deserialize(obj, Request.GetClasspath.class);
+                case "GetProjectDescription" -> context.deserialize(obj, Request.GetProjectDescription.class);
                 default -> throw new JsonParseException("Unknown request type: " + type);
             };
         })
@@ -58,6 +65,7 @@ public class Activator extends AbstractUIPlugin {
     private ExecutorService serverExecutor = Executors.newCachedThreadPool();
     private ServerSocketChannel serverChannel;
     private Path socketPath;
+    private static final Path TRACE_LOG = Path.of(System.getProperty("user.home"), ".equimacs.trace");
 
     @Override
     public void start(BundleContext context) throws Exception {
@@ -156,13 +164,20 @@ public class Activator extends AbstractUIPlugin {
                 if (line.isBlank()) continue;
                 
                 try {
+                    trace("→", line);
                     Request req = gson.fromJson(line, Request.class);
                     Response resp = dispatchRequest(req);
-                    out.println(gson.toJson(resp));
+                    String respJson = gson.toJson(resp);
+                    trace("←", respJson);
+                    out.println(respJson);
                 } catch (JsonParseException e) {
-                    out.println(gson.toJson(new Response.Error("Invalid JSON: " + e.getMessage(), null)));
+                    String errJson = gson.toJson(new Response.Error("Invalid JSON: " + e.getMessage(), null));
+                    trace("←", errJson);
+                    out.println(errJson);
                 } catch (Exception e) {
-                    out.println(gson.toJson(new Response.Error("Execution Error: " + e.getMessage(), null)));
+                    String errJson = gson.toJson(new Response.Error("Execution Error: " + e.getMessage(), null));
+                    trace("←", errJson);
+                    out.println(errJson);
                 }
             }
         } catch (IOException e) {
@@ -213,12 +228,18 @@ public class Activator extends AbstractUIPlugin {
                             logError("Reload failed", e);
                         }
                     }, "equimacs-reload").start();
-                    yield "Reloading...";
+                    yield "Reloading... [" + java.time.LocalTime.now().withNano(0) + "]";
                 }
-                case Request.GetWorkspace w -> "Not implemented yet"; // TODO
-                case Request.GetThreads t -> "Not implemented yet"; // TODO
-                case Request.GetStack s -> "Not implemented yet"; // TODO
-                case Request.GetVariables v -> "Not implemented yet"; // TODO
+                case Request.GetWorkspace w -> controller.getWorkspace();
+                case Request.GetThreads t -> controller.getThreads();
+                case Request.GetStack s -> controller.getStack(s.threadId());
+                case Request.GetVariables v -> controller.getVariables(v.frameId());
+                case Request.GetProblems p -> controller.getProblems(p.project(), p.severity());
+                case Request.Build b -> controller.build(b.project(), b.kind());
+                case Request.GetQuickFixes q -> controller.getQuickFixes(q.file(), q.line());
+                case Request.ApplyFix a -> controller.applyFix(a.file(), a.line(), a.fixIndex());
+                case Request.GetClasspath c -> controller.getClasspath(c.project());
+                case Request.GetProjectDescription d -> controller.getProjectDescription(d.project());
             };
             return new Response.Success(result);
         } catch (Exception e) {
@@ -228,6 +249,13 @@ public class Activator extends AbstractUIPlugin {
 
     public static Activator getDefault() {
         return plugin;
+    }
+
+    private static void trace(String dir, String json) {
+        try {
+            String line = "[" + java.time.LocalTime.now().withNano(0) + "] " + dir + " " + json + "\n";
+            Files.writeString(TRACE_LOG, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException ignored) {}
     }
 
     public static void logInfo(String message) {
