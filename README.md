@@ -10,3 +10,20 @@ Equimacs is an agent-centric bridge for the Eclipse IDE, providing programmatic 
 ## Commands (Port 12345)
 - set-breakpoint:/path/to/file:type_or_handle:line
 - clear-all
+
+## Development & Reproduction
+
+The project uses a custom "Boring Java Build" (no Gradle). 
+
+### Prerequisites
+- JDK 25+
+- Eclipse installation (for plugin APIs)
+- `.env` file configured with `JAVA_HOME` and `ECLIPSE_HOME` (see `.env.example`)
+
+### Reproduce Full Build (Clean -> Build -> Package)
+To perform a deterministic, zero-to-exe reproduction:
+```powershell
+java -cp "lib/gson.jar" tools/mgr/src/main/java/org/equimacs/mgr/EquimacsMgr.java reproduce
+```
+
+The resulting standalone executable will be at `tools/cli/build/app/equimacs/equimacs.exe`.
