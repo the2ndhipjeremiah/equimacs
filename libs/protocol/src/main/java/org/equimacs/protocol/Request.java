@@ -37,6 +37,13 @@ public sealed interface Request {
     record GetProjectDescription(String project) implements Request {}
     record RefreshProject(String project) implements Request {}
 
+    // --- Event Streaming ---
+    record WaitEvent(int timeoutMs) implements Request {}
+
+    // --- Launch ---
+    record Launch(String configName) implements Request {}
+    record ListLaunches() implements Request {}
+
     /**
      * Types of stepping available.
      */

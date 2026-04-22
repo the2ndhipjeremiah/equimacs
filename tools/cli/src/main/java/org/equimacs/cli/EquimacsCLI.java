@@ -122,6 +122,15 @@ public class EquimacsCLI {
                     if (args.size() < 2) exitWithError("Usage: vars <frameId>");
                     yield new Request.GetVariables(Long.parseLong(args.get(1)));
                 }
+                case "wait-event" -> {
+                    String t = cli.getOption("timeout", "t");
+                    yield new Request.WaitEvent(t != null ? Integer.parseInt(t) : 30_000);
+                }
+                case "launch" -> {
+                    if (args.size() < 2) exitWithError("Usage: launch <config-name>");
+                    yield new Request.Launch(args.get(1));
+                }
+                case "list-launches" -> new Request.ListLaunches();
                 default -> {
                     exitWithError("Unknown command: " + cmd);
                     yield null;

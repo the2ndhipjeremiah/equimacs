@@ -4,11 +4,15 @@ import com.google.gson.Gson;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.PrintStream;
+import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import org.apache.felix.service.command.CommandProcessor;
 import org.apache.felix.service.command.CommandSession;
 import org.osgi.framework.BundleContext;
@@ -28,9 +32,13 @@ import org.eclipse.ui.ide.IDE;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.Path;
 import org.eclipse.core.runtime.Status;
+import org.eclipse.debug.core.DebugEvent;
 import org.eclipse.debug.core.DebugPlugin;
 import org.eclipse.debug.core.IBreakpointManager;
+import org.eclipse.debug.core.IDebugEventSetListener;
 import org.eclipse.debug.core.ILaunch;
+import org.eclipse.debug.core.ILaunchConfiguration;
+import org.eclipse.debug.core.ILaunchManager;
 import org.eclipse.debug.core.model.IBreakpoint;
 import org.eclipse.debug.core.model.IDebugTarget;
 import org.eclipse.debug.core.model.ILineBreakpoint;
@@ -44,10 +52,38 @@ import org.eclipse.jdt.debug.core.JDIDebugModel;
 
 public class JavaDebugController {
 
-    // Populated by getThreads(); lets getStack() resolve a threadId back to a live object.
     private final Map<Long, IThread> threadRegistry = new ConcurrentHashMap<>();
-    // Populated by getStack(); lets getVariables() resolve a frameId.
     private final Map<Long, IStackFrame> frameRegistry = new ConcurrentHashMap<>();
+    private final BlockingQueue<JsonObject> eventQueue = new LinkedBlockingQueue<>();
+
+    public void init() {
+        DebugPlugin.getDefault().addDebugEventListener(events -> {
+            for (DebugEvent event : events) {
+                if (event.getKind() == DebugEvent.SUSPEND && event.getSource() instanceof IThread thread) {
+                    JsonObject ev = new JsonObject();
+                    ev.addProperty("event", event.getDetail() == DebugEvent.BREAKPOINT
+                        ? "BreakpointHit" : "StepCompleted");
+                    ev.addProperty("threadId", (long) System.identityHashCode(thread));
+                    try { ev.addProperty("threadName", thread.getName()); } catch (Exception ignored) {}
+                    try {
+                        IStackFrame top = thread.getTopStackFrame();
+                        if (top != null) {
+                            ev.addProperty("line", top.getLineNumber());
+                            if (top instanceof IJavaStackFrame jf) {
+                                ev.addProperty("file", jf.getSourceName());
+                                ev.addProperty("class", jf.getDeclaringTypeName());
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                    eventQueue.offer(ev);
+                } else if (event.getKind() == DebugEvent.TERMINATE) {
+                    JsonObject ev = new JsonObject();
+                    ev.addProperty("event", "Terminated");
+                    eventQueue.offer(ev);
+                }
+            }
+        });
+    }
 
     // --- Breakpoints ---
 
@@ -365,6 +401,41 @@ public class JavaDebugController {
         }
         ResourcesPlugin.getWorkspace().build(buildKind, monitor);
         return "Workspace build complete";
+    }
+
+    // --- Event Streaming ---
+
+    public JsonObject waitEvent(int timeoutMs) throws InterruptedException {
+        JsonObject event = eventQueue.poll(timeoutMs, TimeUnit.MILLISECONDS);
+        if (event == null) {
+            JsonObject timeout = new JsonObject();
+            timeout.addProperty("event", "Timeout");
+            return timeout;
+        }
+        return event;
+    }
+
+    // --- Launch ---
+
+    public String launch(String configName) throws CoreException {
+        ILaunchManager lm = DebugPlugin.getDefault().getLaunchManager();
+        for (ILaunchConfiguration cfg : lm.getLaunchConfigurations()) {
+            if (cfg.getName().equals(configName)) {
+                cfg.launch(ILaunchManager.DEBUG_MODE, new NullProgressMonitor());
+                return "launched: " + configName;
+            }
+        }
+        throw new CoreException(new Status(Status.ERROR, Activator.PLUGIN_ID,
+            "No launch config found: " + configName));
+    }
+
+    public List<String> listLaunches() throws CoreException {
+        ILaunchManager lm = DebugPlugin.getDefault().getLaunchManager();
+        List<String> names = new ArrayList<>();
+        for (ILaunchConfiguration cfg : lm.getLaunchConfigurations()) {
+            names.add(cfg.getName());
+        }
+        return names;
     }
 
     // --- OSGi Shell ---

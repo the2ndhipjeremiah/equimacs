@@ -59,6 +59,9 @@ public class Activator extends AbstractUIPlugin {
                 case "GetClasspath" -> context.deserialize(obj, Request.GetClasspath.class);
                 case "GetProjectDescription" -> context.deserialize(obj, Request.GetProjectDescription.class);
                 case "RefreshProject" -> context.deserialize(obj, Request.RefreshProject.class);
+                case "WaitEvent" -> context.deserialize(obj, Request.WaitEvent.class);
+                case "Launch" -> context.deserialize(obj, Request.Launch.class);
+                case "ListLaunches" -> context.deserialize(obj, Request.ListLaunches.class);
                 default -> throw new JsonParseException("Unknown request type: " + type);
             };
         })
@@ -74,6 +77,7 @@ public class Activator extends AbstractUIPlugin {
         plugin = this;
         bundleContext = context;
         logInfo("Equimacs Bridge Bundle Started.");
+        controller.init();
         startServer();
     }
 
@@ -242,6 +246,9 @@ public class Activator extends AbstractUIPlugin {
                 case Request.GetClasspath c -> controller.getClasspath(c.project());
                 case Request.GetProjectDescription d -> controller.getProjectDescription(d.project());
                 case Request.RefreshProject r -> controller.refreshProject(r.project());
+                case Request.WaitEvent w -> controller.waitEvent(w.timeoutMs());
+                case Request.Launch l -> controller.launch(l.configName());
+                case Request.ListLaunches _ -> controller.listLaunches();
             };
             return new Response.Success(result);
         } catch (Exception e) {
