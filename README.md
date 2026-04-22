@@ -3,38 +3,41 @@
 Equimacs is a local bridge between Eclipse and external tools. It consists of:
 
 - an Eclipse plugin that listens on `~/.equimacs.sock`
-- `eqm`, a CLI for sending bridge requests
+- `eqm-cli`, a CLI for sending bridge requests
 - `eqm-mgr`, a CLI for local build, packaging, deploy, and repo maintenance tasks
 
 The current implementation is centered on Java debugging and Eclipse workspace automation. CDT support is not implemented yet.
 
-## `eqm`
+## `eqm-cli`
 
-`eqm` sends one request to the running bridge and prints one JSON response.
+`eqm-cli` sends one request to the running bridge and prints one JSON response.
 
 Current commands:
 
 ```text
-eqm bp <file>:<line> [-c <condition>]
-eqm list
-eqm clear
-eqm resume
-eqm suspend
-eqm step [over|into|return]
-eqm threads
-eqm stack <threadId>
-eqm vars <frameId>
-eqm reload
-eqm gogo <command...>
-eqm workspace
-eqm problems [project] [-s error|warning|info|all]
-eqm build [project] [-k full|incremental|clean|auto]
-eqm classpath <project>
-eqm describe <project>
-eqm refresh <project>
-eqm quickfixes <file>:<line>
-eqm applyfix <file>:<line> <index>
-eqm --schema
+eqm-cli bp <file>:<line> [-c <condition>]
+eqm-cli list
+eqm-cli clear
+eqm-cli resume
+eqm-cli suspend
+eqm-cli step [over|into|return]
+eqm-cli threads
+eqm-cli stack <threadId>
+eqm-cli vars <frameId>
+eqm-cli reload
+eqm-cli gogo <command...>
+eqm-cli workspace
+eqm-cli problems [project] [-s error|warning|info|all]
+eqm-cli build [project] [-k full|incremental|clean|auto]
+eqm-cli classpath <project>
+eqm-cli describe <project>
+eqm-cli refresh <project>
+eqm-cli quickfixes <file>:<line>
+eqm-cli applyfix <file>:<line> <index>
+eqm-cli wait-event [--timeout <ms>]
+eqm-cli launch <config-name>
+eqm-cli list-launches
+eqm-cli --schema
 ```
 
 ## `eqm-mgr`
@@ -70,7 +73,7 @@ Typical local build:
 java Build.java
 ```
 
-Packaged wrappers live in [bin/eqm](/C:/Users/the2nd/equimacs/bin/eqm) and [bin/eqm-mgr](/C:/Users/the2nd/equimacs/bin/eqm-mgr).
+Packaged wrappers live in [bin/eqm-cli](/C:/Users/the2nd/equimacs/bin/eqm-cli) and [bin/eqm-mgr](/C:/Users/the2nd/equimacs/bin/eqm-mgr).
 
 ## Eclipse
 
