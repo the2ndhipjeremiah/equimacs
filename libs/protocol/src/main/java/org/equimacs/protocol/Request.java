@@ -43,6 +43,8 @@ public sealed interface Request {
     // --- Launch ---
     record Launch(String configName) implements Request {}
     record ListLaunches() implements Request {}
+    record ListSessions() implements Request {}
+    record Terminate() implements Request {}
 
     /**
      * Types of stepping available.

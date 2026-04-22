@@ -131,6 +131,8 @@ public class EquimacsCLI {
                     yield new Request.Launch(args.get(1));
                 }
                 case "list-launches" -> new Request.ListLaunches();
+                case "sessions" -> new Request.ListSessions();
+                case "terminate" -> new Request.Terminate();
                 default -> {
                     exitWithError("Unknown command: " + cmd);
                     yield null;

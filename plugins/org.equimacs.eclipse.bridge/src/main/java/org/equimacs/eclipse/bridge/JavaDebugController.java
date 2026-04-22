@@ -438,6 +438,32 @@ public class JavaDebugController {
         return names;
     }
 
+    public List<Map<String, Object>> listSessions() throws CoreException {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (ILaunch launch : DebugPlugin.getDefault().getLaunchManager().getLaunches()) {
+            Map<String, Object> info = new HashMap<>();
+            info.put("name", launch.getLaunchConfiguration() != null
+                ? launch.getLaunchConfiguration().getName() : "unknown");
+            info.put("terminated", launch.isTerminated());
+            IDebugTarget target = launch.getDebugTarget();
+            info.put("threads", target != null && !target.isTerminated()
+                ? target.getThreads().length : 0);
+            result.add(info);
+        }
+        return result;
+    }
+
+    public String terminate() throws CoreException {
+        int count = 0;
+        for (ILaunch launch : DebugPlugin.getDefault().getLaunchManager().getLaunches()) {
+            if (!launch.isTerminated()) {
+                launch.terminate();
+                count++;
+            }
+        }
+        return "Terminated " + count + " session(s)";
+    }
+
     // --- OSGi Shell ---
 
     public String executeGogo(String command, BundleContext ctx) throws Exception {

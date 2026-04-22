@@ -62,6 +62,8 @@ public class Activator extends AbstractUIPlugin {
                 case "WaitEvent" -> context.deserialize(obj, Request.WaitEvent.class);
                 case "Launch" -> context.deserialize(obj, Request.Launch.class);
                 case "ListLaunches" -> context.deserialize(obj, Request.ListLaunches.class);
+                case "ListSessions" -> context.deserialize(obj, Request.ListSessions.class);
+                case "Terminate" -> context.deserialize(obj, Request.Terminate.class);
                 default -> throw new JsonParseException("Unknown request type: " + type);
             };
         })
@@ -249,6 +251,8 @@ public class Activator extends AbstractUIPlugin {
                 case Request.WaitEvent w -> controller.waitEvent(w.timeoutMs());
                 case Request.Launch l -> controller.launch(l.configName());
                 case Request.ListLaunches _ -> controller.listLaunches();
+                case Request.ListSessions _ -> controller.listSessions();
+                case Request.Terminate _ -> controller.terminate();
             };
             return new Response.Success(result);
         } catch (Exception e) {
