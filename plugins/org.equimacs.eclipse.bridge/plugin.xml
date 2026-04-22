@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+   <extension point="org.eclipse.ui.commands">
+      <command name="Start Equimacs" id="org.equimacs.eclipse.bridge.startCommand" />
+      <command name="Stop Equimacs" id="org.equimacs.eclipse.bridge.stopCommand" />
+   </extension>
+   <extension point="org.eclipse.ui.handlers">
+      <handler commandId="org.equimacs.eclipse.bridge.startCommand" class="org.equimacs.eclipse.bridge.StartHandler" />
+      <handler commandId="org.equimacs.eclipse.bridge.stopCommand" class="org.equimacs.eclipse.bridge.StopHandler" />
+   </extension>
+   <extension point="org.eclipse.ui.menus">
+      <menuContribution locationURI="menu:org.eclipse.ui.main.menu?after=additions">
+         <menu label="Equimacs">
+            <command commandId="org.equimacs.eclipse.bridge.startCommand" label="Start Listening" style="push" />
+            <command commandId="org.equimacs.eclipse.bridge.stopCommand" label="Stop Listening" style="push" />
+         </menu>
+      </menuContribution>
+   </extension>
+</plugin>
