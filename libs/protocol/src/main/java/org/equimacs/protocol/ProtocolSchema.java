@@ -18,6 +18,12 @@ public class ProtocolSchema {
             "condition": { "type": "string", "optional": true, "description": "Conditional expression (Java/JS)" }
           }
         },
+        "list": {
+          "description": "List all registered breakpoints",
+          "aliases": ["bps"],
+          "record": "ListBreakpoints",
+          "params": {}
+        },
         "clear": {
           "description": "Clear all breakpoints in the workspace",
           "record": "ClearAllBreakpoints",
@@ -38,6 +44,18 @@ public class ProtocolSchema {
           "record": "Step",
           "params": {
             "type": { "type": "string", "enum": ["OVER", "INTO", "RETURN"], "default": "OVER" }
+          }
+        },
+        "reload": {
+          "description": "Hot-reload the bridge plugin in-process; CLI polls until socket is back",
+          "record": "Reload",
+          "params": {}
+        },
+        "gogo": {
+          "description": "Execute an arbitrary Gogo shell command and return its output",
+          "record": "GogoExec",
+          "params": {
+            "command": { "type": "string", "description": "The Gogo shell command line to execute" }
           }
         },
         "threads": {

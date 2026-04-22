@@ -40,8 +40,8 @@ public class EquimacsCLI {
         if (request == null) return;
 
         try {
-            String response = sendRequest(request);
-            System.out.println(response);
+            System.out.println(sendRequest(request));
+            if (request instanceof Request.Reload) awaitBridgeReady();
         } catch (Exception e) {
             exitWithError(e.getMessage());
         }
@@ -53,9 +53,15 @@ public class EquimacsCLI {
             return switch (cmd) {
                 case "bp" -> {
                     if (args.size() < 2) exitWithError("Usage: bp <file>:<line>");
-                    String[] parts = args.get(1).split(":");
-                    yield new Request.SetBreakpoint(parts[0], Integer.parseInt(parts[1]), condition);
+                    String spec = args.get(1);
+                    int lastColon = spec.lastIndexOf(':');
+                    if (lastColon <= 0) exitWithError("Usage: bp <file>:<line> (missing line number)");
+                    yield new Request.SetBreakpoint(
+                        spec.substring(0, lastColon),
+                        Integer.parseInt(spec.substring(lastColon + 1)),
+                        condition);
                 }
+                case "list", "bps" -> new Request.ListBreakpoints();
                 case "clear" -> new Request.ClearAllBreakpoints();
                 case "resume" -> new Request.Resume();
                 case "suspend" -> new Request.Suspend();
@@ -66,6 +72,11 @@ public class EquimacsCLI {
                     }
                     yield new Request.Step(type);
                 }
+                case "gogo" -> {
+                    if (args.size() < 2) exitWithError("Usage: gogo <command...>");
+                    yield new Request.GogoExec(String.join(" ", args.subList(1, args.size())));
+                }
+                case "reload" -> new Request.Reload();
                 case "threads" -> new Request.GetThreads();
                 case "stack" -> {
                     if (args.size() < 2) exitWithError("Usage: stack <threadId>");
@@ -101,6 +112,22 @@ public class EquimacsCLI {
             
             return line;
         }
+    }
+
+    private static void awaitBridgeReady() {
+        Path socketPath = Path.of(System.getProperty("user.home"), ".equimacs.sock");
+        for (int i = 0; i < 20; i++) {
+            try {
+                Thread.sleep(500);
+                try (SocketChannel ch = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+                    ch.connect(UnixDomainSocketAddress.of(socketPath));
+                    System.out.println(gson.toJson(new Response.Success("ready")));
+                    return;
+                }
+            } catch (Exception ignored) {}
+        }
+        System.out.println(gson.toJson(new Response.Error("Bridge did not come back within 10s", null)));
+        System.exit(1);
     }
 
     private static void exitWithError(String message) {

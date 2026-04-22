@@ -16,18 +16,23 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.ui.plugin.AbstractUIPlugin;
 import org.equimacs.protocol.Request;
 import org.equimacs.protocol.Response;
+import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
+import org.osgi.framework.wiring.FrameworkWiring;
 
 public class Activator extends AbstractUIPlugin {
     public static final String PLUGIN_ID = "org.equimacs.eclipse.bridge";
     private static Activator plugin;
     private final DebugController controller = new DebugController();
+    private org.osgi.framework.BundleContext bundleContext;
     private final Gson gson = new GsonBuilder()
         .registerTypeAdapter(Request.class, (JsonDeserializer<Request>) (json, typeOfT, context) -> {
             JsonObject obj = json.getAsJsonObject();
@@ -36,9 +41,12 @@ public class Activator extends AbstractUIPlugin {
             return switch (type) {
                 case "SetBreakpoint" -> context.deserialize(obj, Request.SetBreakpoint.class);
                 case "ClearAllBreakpoints" -> context.deserialize(obj, Request.ClearAllBreakpoints.class);
+                case "ListBreakpoints" -> context.deserialize(obj, Request.ListBreakpoints.class);
                 case "Resume" -> context.deserialize(obj, Request.Resume.class);
                 case "Suspend" -> context.deserialize(obj, Request.Suspend.class);
                 case "Step" -> context.deserialize(obj, Request.Step.class);
+                case "GogoExec" -> context.deserialize(obj, Request.GogoExec.class);
+                case "Reload" -> context.deserialize(obj, Request.Reload.class);
                 case "GetWorkspace" -> context.deserialize(obj, Request.GetWorkspace.class);
                 case "GetThreads" -> context.deserialize(obj, Request.GetThreads.class);
                 case "GetStack" -> context.deserialize(obj, Request.GetStack.class);
@@ -47,7 +55,7 @@ public class Activator extends AbstractUIPlugin {
             };
         })
         .create();
-    private final ExecutorService serverExecutor = Executors.newCachedThreadPool();
+    private ExecutorService serverExecutor = Executors.newCachedThreadPool();
     private ServerSocketChannel serverChannel;
     private Path socketPath;
 
@@ -55,6 +63,7 @@ public class Activator extends AbstractUIPlugin {
     public void start(BundleContext context) throws Exception {
         super.start(context);
         plugin = this;
+        bundleContext = context;
         logInfo("Equimacs Bridge Bundle Started.");
         startServer();
     }
@@ -71,8 +80,9 @@ public class Activator extends AbstractUIPlugin {
             return;
         }
 
+        serverExecutor = Executors.newCachedThreadPool();
+
         try {
-            // Use a standard location for the Unix Domain Socket
             String userHome = System.getProperty("user.home");
             socketPath = Path.of(userHome, ".equimacs.sock");
             
@@ -113,13 +123,22 @@ public class Activator extends AbstractUIPlugin {
         try {
             if (serverChannel != null) {
                 serverChannel.close();
+                serverChannel = null;
             }
             if (socketPath != null) {
                 Files.deleteIfExists(socketPath);
             }
-            serverExecutor.shutdownNow();
         } catch (IOException e) {
             logError("Error stopping server", e);
+        }
+        serverExecutor.shutdown();
+        try {
+            if (!serverExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
+                serverExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            serverExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -160,6 +179,7 @@ public class Activator extends AbstractUIPlugin {
                     yield "Breakpoint set at " + b.path() + ":" + b.line() + 
                           (b.condition() != null ? " with condition: " + b.condition() : "");
                 }
+                case Request.ListBreakpoints l -> controller.listBreakpoints();
                 case Request.ClearAllBreakpoints c -> {
                     controller.clearAllBreakpoints();
                     yield "All breakpoints cleared";
@@ -179,6 +199,21 @@ public class Activator extends AbstractUIPlugin {
                         case RETURN -> controller.stepReturn();
                     }
                     yield "Step executed";
+                }
+                case Request.GogoExec g -> controller.executeGogo(g.command(), bundleContext);
+                case Request.Reload ignored -> {
+                    Bundle self = bundleContext.getBundle();
+                    Bundle system = bundleContext.getBundle(0);
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(300);
+                            self.update();
+                            system.adapt(FrameworkWiring.class).refreshBundles(Collections.singleton(self));
+                        } catch (Exception e) {
+                            logError("Reload failed", e);
+                        }
+                    }, "equimacs-reload").start();
+                    yield "Reloading...";
                 }
                 case Request.GetWorkspace w -> "Not implemented yet"; // TODO
                 case Request.GetThreads t -> "Not implemented yet"; // TODO

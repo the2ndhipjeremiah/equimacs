@@ -24,6 +24,8 @@ Import-Package: \
     org.eclipse.jdt.debug.core,\
     org.eclipse.core.resources,\
     org.eclipse.jdt.core,\
+    org.apache.felix.service.command;resolution:=optional,\
+    org.osgi.framework.wiring,\
     *
 
 -exportcontents: org.equimacs.eclipse.bridge.*

@@ -1,5 +1,16 @@
 package org.equimacs.eclipse.bridge;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.PrintStream;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import org.apache.felix.service.command.CommandProcessor;
+import org.apache.felix.service.command.CommandSession;
+import org.osgi.framework.BundleContext;
+import org.osgi.framework.ServiceReference;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
@@ -7,8 +18,11 @@ import org.eclipse.core.runtime.Path;
 import org.eclipse.debug.core.DebugPlugin;
 import org.eclipse.debug.core.IBreakpointManager;
 import org.eclipse.debug.core.ILaunch;
+import org.eclipse.debug.core.model.IBreakpoint;
 import org.eclipse.debug.core.model.IDebugTarget;
+import org.eclipse.debug.core.model.ILineBreakpoint;
 import org.eclipse.debug.core.model.IThread;
+import org.eclipse.jdt.debug.core.IJavaLineBreakpoint;
 import org.eclipse.jdt.debug.core.JDIDebugModel;
 
 public class DebugController {
@@ -60,9 +74,55 @@ public class DebugController {
                 }
             } catch (org.eclipse.jdt.core.JavaModelException ignored) {}
         }
-        // Fallback: use filename as type (less reliable)
+        // Fallback: not in a Java project or JDT model unavailable — type name may be wrong
         String name = resource.getName();
-        return name.substring(0, name.lastIndexOf('.'));
+        String simpleName = name.substring(0, name.lastIndexOf('.'));
+        Activator.logError("Could not resolve fully-qualified type name for " + resource.getFullPath() + ", falling back to '" + simpleName + "'. Ensure the file is in an Eclipse Java project.", null);
+        return simpleName;
+    }
+
+    public String executeGogo(String command, BundleContext ctx) throws Exception {
+        ServiceReference<CommandProcessor> ref = ctx.getServiceReference(CommandProcessor.class);
+        if (ref == null) throw new Exception("Gogo CommandProcessor service not found — is the OSGi console enabled? (add -console to eclipse.ini)");
+        CommandProcessor processor = ctx.getService(ref);
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            PrintStream out = new PrintStream(baos, true, "UTF-8");
+            try (CommandSession session = processor.createSession(InputStream.nullInputStream(), out, out)) {
+                Object result = session.execute(command);
+                out.flush();
+                String output = baos.toString("UTF-8").trim();
+                if (result != null) {
+                    String rs = result.toString();
+                    if (!rs.isEmpty()) output = output.isEmpty() ? rs : output + "\n" + rs;
+                }
+                return output.isEmpty() ? "(no output)" : output;
+            }
+        } finally {
+            ctx.ungetService(ref);
+        }
+    }
+
+    public List<Map<String, Object>> listBreakpoints() throws CoreException {
+        IBreakpointManager manager = DebugPlugin.getDefault().getBreakpointManager();
+        IBreakpoint[] breakpoints = manager.getBreakpoints();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (IBreakpoint bp : breakpoints) {
+            Map<String, Object> info = new HashMap<>();
+            IResource resource = bp.getMarker().getResource();
+            info.put("resource", resource.getFullPath().toString());
+            info.put("enabled", bp.isEnabled());
+            if (bp instanceof ILineBreakpoint lineBp) {
+                info.put("line", lineBp.getLineNumber());
+            }
+            if (bp instanceof IJavaLineBreakpoint javaBp) {
+                info.put("typeName", javaBp.getTypeName());
+                String cond = javaBp.getCondition();
+                if (cond != null && !cond.isBlank()) info.put("condition", cond);
+            }
+            result.add(info);
+        }
+        return result;
     }
 
     public void clearAllBreakpoints() throws CoreException {

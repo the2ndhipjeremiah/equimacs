@@ -11,11 +11,16 @@ public sealed interface Request {
     // --- Breakpoints ---
     record SetBreakpoint(String path, int line, String condition) implements Request {}
     record ClearAllBreakpoints() implements Request {}
+    record ListBreakpoints() implements Request {}
 
     // --- Execution Control ---
     record Resume() implements Request {}
     record Suspend() implements Request {}
     record Step(StepType type) implements Request {}
+
+    // --- Shell ---
+    record GogoExec(String command) implements Request {}
+    record Reload() implements Request {}
 
     // --- Inspection ---
     record GetWorkspace() implements Request {}
