@@ -147,14 +147,14 @@ public class Build {
             Path gsonJar   = ROOT.resolve("lib/gson.jar");
             Path cliLibOut = ROOT.resolve("libs/cli/build/classes");
 
-            packageApp("eqmcli", "org.equimacs.cli.EquimacsCLI",
+            packageApp("eqm", "org.equimacs.cli.EquimacsCLI",
                 ROOT.resolve("tools/cli/build"),
                 List.of(ROOT.resolve("tools/cli/build/classes"),
                         ROOT.resolve("libs/protocol/build/classes"),
                         cliLibOut),
                 gsonJar);
 
-            packageApp("eqmgr", "org.equimacs.mgr.EquimacsMgr",
+            packageApp("eqm-mgr", "org.equimacs.mgr.EquimacsMgr",
                 ROOT.resolve("tools/mgr/build"),
                 List.of(ROOT.resolve("tools/mgr/build/classes"), cliLibOut),
                 gsonJar);

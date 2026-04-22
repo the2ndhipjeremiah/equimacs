@@ -1,29 +1,79 @@
-# Equimacs: The Agentic Eclipse Bridge
+# Equimacs
 
-Equimacs is an agent-centric bridge for the Eclipse IDE, providing programmatic control over debugging, breakpoints, and hot-reloading for Java and C/C++.
+Equimacs is a local bridge between Eclipse and external tools. It consists of:
 
-## Setup
-1. Add -console, 1234, and -Dosgi.console.enable.builtin=true to your eclipse.ini.
-2. Place org.equimacs.eclipse.bridge in your dropins.
-3. Click Equimacs > Start Listening.
+- an Eclipse plugin that listens on `~/.equimacs.sock`
+- `eqm`, a CLI for sending bridge requests
+- `eqm-mgr`, a CLI for local build, packaging, deploy, and repo maintenance tasks
 
-## Commands (Port 12345)
-- set-breakpoint:/path/to/file:type_or_handle:line
-- clear-all
+The current implementation is centered on Java debugging and Eclipse workspace automation. CDT support is not implemented yet.
 
-## Development & Reproduction
+## `eqm`
 
-The project uses a custom "Boring Java Build" (no Gradle). 
+`eqm` sends one request to the running bridge and prints one JSON response.
 
-### Prerequisites
-- JDK 25+
-- Eclipse installation (for plugin APIs)
-- `.env` file configured with `JAVA_HOME` and `ECLIPSE_HOME` (see `.env.example`)
+Current commands:
 
-### Reproduce Full Build (Clean -> Build -> Package)
-To perform a deterministic, zero-to-exe reproduction:
-```powershell
-java -cp "lib/gson.jar" tools/mgr/src/main/java/org/equimacs/mgr/EquimacsMgr.java reproduce
+```text
+eqm bp <file>:<line> [-c <condition>]
+eqm list
+eqm clear
+eqm resume
+eqm suspend
+eqm step [over|into|return]
+eqm threads
+eqm stack <threadId>
+eqm vars <frameId>
+eqm reload
+eqm gogo <command...>
+eqm workspace
+eqm problems [project] [-s error|warning|info|all]
+eqm build [project] [-k full|incremental|clean|auto]
+eqm classpath <project>
+eqm describe <project>
+eqm refresh <project>
+eqm quickfixes <file>:<line>
+eqm applyfix <file>:<line> <index>
+eqm --schema
 ```
 
-The resulting standalone executable will be at `tools/cli/build/app/equimacs/equimacs.exe`.
+## `eqm-mgr`
+
+`eqm-mgr` is the local manager CLI for this repository.
+
+Current commands:
+
+```text
+eqm-mgr build
+eqm-mgr deploy
+eqm-mgr test-cli <cmd> [args...]
+eqm-mgr sync-context
+eqm-mgr list-context
+eqm-mgr clean
+eqm-mgr all
+eqm-mgr package
+eqm-mgr reproduce
+```
+
+## Build
+
+This repo uses [Build.java](/C:/Users/the2nd/equimacs/Build.java) rather than Gradle.
+
+Environment is read from `.env`:
+
+- `JAVA_HOME`: JDK 25
+- `ECLIPSE_HOME`: Eclipse installation root
+
+Typical local build:
+
+```powershell
+java Build.java
+```
+
+Packaged wrappers live in [bin/eqm](/C:/Users/the2nd/equimacs/bin/eqm) and [bin/eqm-mgr](/C:/Users/the2nd/equimacs/bin/eqm-mgr).
+
+## Eclipse
+
+After building and deploying the plugin into `dropins/`, the bridge starts automatically when Eclipse loads the bundle.
+
+Use `Equimacs Bridge > Start Listening` only if you have stopped it and want to bring the socket back manually.

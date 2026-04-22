@@ -162,7 +162,7 @@ public class EquimacsMgr {
         if (!Files.exists(gsonJar)) throw new IllegalStateException("Not found (run build first): " + gsonJar);
 
         System.out.println(">>> Packaging Equimacs CLI...");
-        packageApp("eqmcli", "org.equimacs.cli.EquimacsCLI",
+        packageApp("eqm", "org.equimacs.cli.EquimacsCLI",
             REPO_ROOT.resolve("tools/cli/build"),
             List.of(REPO_ROOT.resolve("tools/cli/build/classes"),
                     REPO_ROOT.resolve("libs/protocol/build/classes"),
@@ -170,7 +170,7 @@ public class EquimacsMgr {
             gsonJar);
 
         System.out.println(">>> Packaging Equimacs Manager...");
-        packageApp("eqmgr", "org.equimacs.mgr.EquimacsMgr",
+        packageApp("eqm-mgr", "org.equimacs.mgr.EquimacsMgr",
             REPO_ROOT.resolve("tools/mgr/build"),
             List.of(REPO_ROOT.resolve("tools/mgr/build/classes"), cliLibOut),
             gsonJar);
