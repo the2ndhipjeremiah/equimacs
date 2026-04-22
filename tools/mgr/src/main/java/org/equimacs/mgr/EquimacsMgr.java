@@ -153,66 +153,117 @@ public class EquimacsMgr {
     }
 
     private static void runPackage() throws Exception {
-        Path gsonJar = REPO_ROOT.resolve("lib/gson.jar");
-        Path cliLibOut = REPO_ROOT.resolve("libs/cli/build/classes");
-        
-        // --- 1. Package Equimacs CLI ---
+        if (JAVA_HOME == null) throw new IllegalStateException("JAVA_HOME is not set; cannot run jpackage");
+        Path jpackageBin = Path.of(JAVA_HOME, "bin", "jpackage.exe");
+        if (!Files.exists(jpackageBin)) throw new IllegalStateException("jpackage not found: " + jpackageBin);
+
+        Path gsonJar    = REPO_ROOT.resolve("lib/gson.jar");
+        Path cliLibOut  = REPO_ROOT.resolve("libs/cli/build/classes");
+        if (!Files.exists(gsonJar)) throw new IllegalStateException("Not found (run build first): " + gsonJar);
+
         System.out.println(">>> Packaging Equimacs CLI...");
-        packageApp("equimacs", "org.equimacs.cli.EquimacsCLI", 
+        packageApp("equimacs", "org.equimacs.cli.EquimacsCLI",
             REPO_ROOT.resolve("tools/cli/build"),
-            List.of(REPO_ROOT.resolve("tools/cli/build/classes"), REPO_ROOT.resolve("libs/protocol/build/classes"), cliLibOut),
+            List.of(REPO_ROOT.resolve("tools/cli/build/classes"),
+                    REPO_ROOT.resolve("libs/protocol/build/classes"),
+                    cliLibOut),
             gsonJar);
 
-        // --- 2. Package Equimacs Manager ---
         System.out.println(">>> Packaging Equimacs Manager...");
-        packageApp("eqmgr", "org.equimacs.mgr.EquimacsMgr", 
+        packageApp("eqmgr", "org.equimacs.mgr.EquimacsMgr",
             REPO_ROOT.resolve("tools/mgr/build"),
             List.of(REPO_ROOT.resolve("tools/mgr/build/classes"), cliLibOut),
             gsonJar);
     }
 
     private static void packageApp(String name, String mainClass, Path buildDir, List<Path> classDirs, Path gsonJar) throws Exception {
-        Path libsDir = buildDir.resolve("libs");
+        // Pre-flight: verify all class dirs exist before touching anything
+        for (Path dir : classDirs) {
+            if (!Files.exists(dir))
+                throw new IllegalStateException("Class dir not found (run build first): " + dir);
+        }
+
+        Path libsDir    = buildDir.resolve("libs");
         Path appOutBase = buildDir.resolve("app");
+        Path tmpExplode = buildDir.resolve("tmp_explode");
+        Path fatJar     = libsDir.resolve(name + "-fat.jar");
+        Path finalApp   = appOutBase.resolve(name);
+
         deleteDir(libsDir);
-        deleteDir(appOutBase);
         Files.createDirectories(libsDir);
         Files.createDirectories(appOutBase);
 
-        Path fatJar = libsDir.resolve(name + "-fat.jar");
-        
-        // Explode GSON
-        Path tmpExplode = buildDir.resolve("tmp_explode");
-        deleteDir(tmpExplode);
-        Files.createDirectories(tmpExplode);
-        runProcess(List.of(getJar(), "xf", gsonJar.toString()), tmpExplode);
-
-        // Create Fat JAR
-        List<String> jarCmd = new ArrayList<>(List.of(getJar(), "--create", "--file", fatJar.toString(), "--main-class", mainClass));
-        for (Path dir : classDirs) {
-            jarCmd.addAll(List.of("-C", dir.toString(), "."));
+        // Remove artefacts left by any previous interrupted run
+        try (var s = Files.list(appOutBase)) {
+            s.filter(p -> {
+                String n = p.getFileName().toString();
+                return n.startsWith("jpackage-") || n.startsWith(name + ".old.");
+            }).forEach(p -> { try { deleteDir(p); } catch (IOException ignored) {} });
         }
-        jarCmd.addAll(List.of("-C", tmpExplode.toString(), "."));
-        runProcess(jarCmd, REPO_ROOT);
 
-        // Run jpackage in a temp dir to avoid Windows "already exists" errors
-        Path jpackageTemp = Files.createTempDirectory(appOutBase, "jpackage-");
-        runProcess(List.of(
-            Path.of(JAVA_HOME, "bin/jpackage").toString(),
-            "--type", "app-image",
-            "--dest", jpackageTemp.toString(),
-            "--name", name,
-            "--main-jar", fatJar.getFileName().toString(),
-            "--input", libsDir.toString(),
-            "--main-class", mainClass,
-            "--vendor", "Equimacs"
-        ), REPO_ROOT);
+        // Use a timestamped name so a stale .old dir never causes FileAlreadyExistsException
+        Path oldApp = appOutBase.resolve(name + ".old." + System.currentTimeMillis());
 
-        Path finalApp = appOutBase.resolve(name);
-        deleteDir(finalApp);
-        Files.move(jpackageTemp.resolve(name), finalApp, StandardCopyOption.REPLACE_EXISTING);
-        deleteDir(jpackageTemp);
-        System.out.println("Executable created at: " + finalApp.resolve(name + ".exe"));
+        Path jpackageTemp = null;
+        boolean renamedOld = false;
+        try {
+            // Build fat JAR
+            deleteDir(tmpExplode);
+            Files.createDirectories(tmpExplode);
+            runProcess(List.of(getJar(), "xf", gsonJar.toString()), tmpExplode);
+
+            List<String> jarCmd = new ArrayList<>(List.of(
+                getJar(), "--create", "--file", fatJar.toString(), "--main-class", mainClass));
+            for (Path dir : classDirs) jarCmd.addAll(List.of("-C", dir.toString(), "."));
+            jarCmd.addAll(List.of("-C", tmpExplode.toString(), "."));
+            runProcess(jarCmd, REPO_ROOT);
+
+            // Run jpackage into a temp dir so a failed run never touches the live image
+            jpackageTemp = Files.createTempDirectory(appOutBase, "jpackage-");
+            runProcess(List.of(
+                Path.of(JAVA_HOME, "bin/jpackage").toString(),
+                "--type", "app-image",
+                "--dest", jpackageTemp.toString(),
+                "--name", name,
+                "--main-jar", fatJar.getFileName().toString(),
+                "--input", libsDir.toString(),
+                "--main-class", mainClass,
+                "--vendor", "Equimacs"
+            ), REPO_ROOT);
+
+            // Verify the new image is complete before we touch the live one
+            verifyAppImage(jpackageTemp.resolve(name), name);
+
+            // Swap: rename the old dir aside first so the live image is never absent.
+            // Renaming works on Windows even if the exe is mapped into memory; deleting does not.
+            if (Files.exists(finalApp)) {
+                Files.move(finalApp, oldApp);
+                renamedOld = true;
+            }
+            Files.move(jpackageTemp.resolve(name), finalApp);
+            renamedOld = false; // committed — old dir is now safe to remove
+
+        } catch (Exception e) {
+            // If the swap was half-done, put the old image back
+            if (renamedOld && !Files.exists(finalApp)) {
+                try { Files.move(oldApp, finalApp); } catch (IOException ignored) {}
+            }
+            throw e;
+        } finally {
+            try { deleteDir(tmpExplode); } catch (IOException ignored) {}
+            if (jpackageTemp != null) try { deleteDir(jpackageTemp); } catch (IOException ignored) {}
+            if (!renamedOld)          try { deleteDir(oldApp);       } catch (IOException ignored) {}
+        }
+
+        verifyAppImage(finalApp, name);
+        System.out.println("  Executable: " + finalApp.resolve(name + ".exe"));
+    }
+
+    private static void verifyAppImage(Path appDir, String name) {
+        for (String entry : new String[]{ name + ".exe", "app", "runtime" }) {
+            if (!Files.exists(appDir.resolve(entry)))
+                throw new RuntimeException("Incomplete app image at " + appDir + ": missing " + entry);
+        }
     }
 
     private static void loadEnv() throws IOException {
@@ -247,24 +298,12 @@ public class EquimacsMgr {
 
     private static void deleteDir(Path p) throws IOException {
         if (!Files.exists(p)) return;
-        
-        long start = System.currentTimeMillis();
-        while (System.currentTimeMillis() - start < 5000) { // 5 second timeout
-            try {
-                try (var s = Files.walk(p)) {
-                    var paths = s.sorted(Comparator.reverseOrder()).toList();
-                    for (Path path : paths) {
-                        Files.deleteIfExists(path);
-                    }
-                }
-                if (!Files.exists(p)) return;
-            } catch (IOException e) {
-                // Wait and retry
-                try { Thread.sleep(200); } catch (InterruptedException ignored) {}
+        try (var s = Files.walk(p)) {
+            for (Path path : s.sorted(Comparator.reverseOrder()).toList()) {
+                // jpackage marks some runtime files read-only on Windows; clear it before deleting
+                path.toFile().setWritable(true);
+                Files.deleteIfExists(path);
             }
-        }
-        if (Files.exists(p)) {
-            throw new IOException("Failed to delete directory after timeout: " + p);
         }
     }
 }
