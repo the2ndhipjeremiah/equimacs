@@ -1,1 +1,1 @@
-Refer to `context/GEMINI.md`
+Refer to `context/AGENTS.md`

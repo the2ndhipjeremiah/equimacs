@@ -1,1 +1,1 @@
-Refer to `context/CLAUDE.md`
+Refer to `context/AGENTS.md`
