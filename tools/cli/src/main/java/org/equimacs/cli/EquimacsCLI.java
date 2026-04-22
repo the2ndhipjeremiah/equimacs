@@ -1,6 +1,9 @@
 package org.equimacs.cli;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonSerializer;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
@@ -16,7 +19,13 @@ import org.equimacs.protocol.ProtocolSchema;
 import org.equimacs.cli.util.CliArgs;
 
 public class EquimacsCLI {
-    private static final Gson gson = new Gson();
+    private static final Gson gson = new GsonBuilder()
+        .registerTypeAdapter(Request.class, (JsonSerializer<Request>) (src, typeOfSrc, context) -> {
+            JsonObject obj = context.serialize(src).getAsJsonObject();
+            obj.addProperty("type", src.getClass().getSimpleName());
+            return obj;
+        })
+        .create();
 
     public static void main(String[] args) {
         CliArgs cli = CliArgs.parse(args);
@@ -31,8 +40,8 @@ public class EquimacsCLI {
         if (request == null) return;
 
         try {
-            Response response = sendRequest(request);
-            System.out.println(gson.toJson(response));
+            String response = sendRequest(request);
+            System.out.println(response);
         } catch (Exception e) {
             exitWithError(e.getMessage());
         }
@@ -77,7 +86,7 @@ public class EquimacsCLI {
         }
     }
 
-    private static Response sendRequest(Request request) throws Exception {
+    private static String sendRequest(Request request) throws Exception {
         Path socketPath = Path.of(System.getProperty("user.home"), ".equimacs.sock");
         
         try (SocketChannel channel = SocketChannel.open(StandardProtocolFamily.UNIX)) {
@@ -86,11 +95,11 @@ public class EquimacsCLI {
             PrintWriter out = new PrintWriter(Channels.newOutputStream(channel), true);
             BufferedReader in = new BufferedReader(new InputStreamReader(Channels.newInputStream(channel)));
             
-            out.println(gson.toJson(request));
+            out.println(gson.toJson(request, Request.class));
             String line = in.readLine();
             if (line == null) throw new Exception("No response from server");
             
-            return gson.fromJson(line, Response.class);
+            return line;
         }
     }
 

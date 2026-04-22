@@ -11,10 +11,26 @@
    </extension>
    <extension point="org.eclipse.ui.menus">
       <menuContribution locationURI="menu:org.eclipse.ui.main.menu?after=additions">
-         <menu label="Equimacs">
+         <menu label="Equimacs Bridge" id="org.equimacs.eclipse.bridge.menu">
             <command commandId="org.equimacs.eclipse.bridge.startCommand" label="Start Listening" style="push" />
             <command commandId="org.equimacs.eclipse.bridge.stopCommand" label="Stop Listening" style="push" />
          </menu>
+      </menuContribution>
+      <menuContribution locationURI="toolbar:org.eclipse.ui.main.toolbar?after=additions">
+         <toolbar id="org.equimacs.eclipse.bridge.toolbar">
+            <command
+                  commandId="org.equimacs.eclipse.bridge.startCommand"
+                  label="Start Listening"
+                  tooltip="Start the Equimacs Bridge Listening"
+                  style="push">
+            </command>
+            <command
+                  commandId="org.equimacs.eclipse.bridge.stopCommand"
+                  label="Stop Listening"
+                  tooltip="Stop the Equimacs Bridge Listening"
+                  style="push">
+            </command>
+         </toolbar>
       </menuContribution>
    </extension>
 </plugin>

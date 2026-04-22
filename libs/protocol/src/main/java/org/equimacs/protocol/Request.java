@@ -18,6 +18,7 @@ public sealed interface Request {
     record Step(StepType type) implements Request {}
 
     // --- Inspection ---
+    record GetWorkspace() implements Request {}
     record GetThreads() implements Request {}
     record GetStack(long threadId) implements Request {}
     record GetVariables(long frameId) implements Request {}

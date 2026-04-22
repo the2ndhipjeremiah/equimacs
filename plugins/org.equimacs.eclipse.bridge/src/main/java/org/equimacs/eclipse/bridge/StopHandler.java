@@ -9,10 +9,19 @@ import org.eclipse.ui.handlers.HandlerUtil;
 public class StopHandler extends AbstractHandler {
     @Override
     public Object execute(ExecutionEvent event) throws ExecutionException {
-        Activator activator = Activator.getDefault();
-        if (activator != null) {
-            activator.stopServer();
-            MessageDialog.openInformation(HandlerUtil.getActiveShell(event), "Equimacs", "Equimacs bridge stopped.");
+        try {
+            Activator activator = Activator.getDefault();
+            if (activator != null) {
+                activator.stopServer();
+                MessageDialog.openInformation(
+                    HandlerUtil.getActiveShell(event),
+                    "Equimacs Bridge",
+                    "Equimacs bridge stopped."
+                );
+            }
+        } catch (Exception e) {
+            Activator.logError("Failed to stop Equimacs Bridge", e);
+            throw new ExecutionException("Failed to stop Equimacs Bridge", e);
         }
         return null;
     }

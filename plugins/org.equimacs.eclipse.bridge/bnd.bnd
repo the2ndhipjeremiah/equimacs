@@ -1,13 +1,15 @@
-Bundle-SymbolicName: org.equimacs.eclipse.bridge
+Bundle-SymbolicName: org.equimacs.eclipse.bridge;singleton:=true
 Bundle-Version: 1.0.0.qualifier
 Bundle-Activator: org.equimacs.eclipse.bridge.Activator
-Bundle-ActivationPolicy: lazy
+Eclipse-BundleShape: dir
+
+Bundle-RequiredExecutionEnvironment: JavaSE-21
 
 # Include our compiled classes and resources
 -includeresource: \
   @${env;REPO_ROOT}/libs/protocol/build/libs/protocol.jar, \
   @${env;REPO_ROOT}/lib/gson.jar, \
-  plugin.xml=src/main/resources/plugin.xml
+  plugin.xml=plugin.xml
 
 # Bnd will find classes in this path
 -classpath: build/classes

@@ -29,6 +29,7 @@ public class Build {
             buildProtocol();
             buildBridge();
             buildCLI();
+            buildMgr();
             
             copyToDropins();
             
@@ -46,7 +47,7 @@ public class Build {
             Path out = ROOT.resolve("libs/cli/build/classes");
             if (Files.exists(out)) deleteDir(out);
             Files.createDirectories(out);
-            runProcess(List.of(getJavac(), "-d", out.toString(), "--release", "25",
+            runProcess(List.of(getJavac(), "-d", out.toString(), "--release", "21",
                 src.resolve("org/equimacs/cli/util/CliArgs.java").toString()));
         });
     }
@@ -58,7 +59,7 @@ public class Build {
             if (Files.exists(out)) deleteDir(out);
             Files.createDirectories(out);
 
-            runProcess(List.of(getJavac(), "-d", out.toString(), "--release", "25",
+            runProcess(List.of(getJavac(), "-d", out.toString(), "--release", "21",
                 src.resolve("org/equimacs/protocol/ProtocolSchema.java").toString(),
                 src.resolve("org/equimacs/protocol/Request.java").toString(),
                 src.resolve("org/equimacs/protocol/Response.java").toString()));
@@ -83,7 +84,7 @@ public class Build {
             cp += File.pathSeparator + ROOT.resolve("libs/cli/build/classes");
             cp += File.pathSeparator + getLib("gson");
 
-            List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "25"));
+            List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "21"));
             try (Stream<Path> s = Files.walk(src)) {
                 s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
             }
@@ -105,8 +106,21 @@ public class Build {
             String cp = ROOT.resolve("libs/protocol/build/libs/protocol.jar") + 
                         File.pathSeparator + ROOT.resolve("libs/cli/build/classes") + 
                         File.pathSeparator + getLib("gson");
-            runProcess(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "25",
+            runProcess(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "21",
                 src.resolve("org/equimacs/cli/EquimacsCLI.java").toString()));
+        });
+    }
+
+    private static void buildMgr() throws Exception {
+        step("mgr", () -> {
+            Path src = ROOT.resolve("tools/mgr/src/main/java");
+            Path out = ROOT.resolve("tools/mgr/build/classes");
+            if (Files.exists(out)) deleteDir(out);
+            Files.createDirectories(out);
+
+            String cp = ROOT.resolve("libs/cli/build/classes") + File.pathSeparator + getLib("gson");
+            runProcess(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "21",
+                src.resolve("org/equimacs/mgr/EquimacsMgr.java").toString()));
         });
     }
 
@@ -122,13 +136,17 @@ public class Build {
         }
     }
 
-    private static void copyToDropins() throws IOException {
+    private static void copyToDropins() throws Exception {
         Path jar = ROOT.resolve("plugins/org.equimacs.eclipse.bridge/build/libs/org.equimacs.eclipse.bridge.jar");
         if (Files.exists(jar)) {
             if (ECLIPSE_HOME != null) {
-                Path dest = Path.of(ECLIPSE_HOME, "dropins", jar.getFileName().toString());
-                System.out.println("  [deploy] -> " + dest);
-                Files.copy(jar, dest, StandardCopyOption.REPLACE_EXISTING);
+                Path dropins = Path.of(ECLIPSE_HOME, "dropins");
+                Path dest = dropins.resolve("org.equimacs.eclipse.bridge");
+                if (Files.exists(dest)) deleteDir(dest);
+                Files.createDirectories(dest);
+                
+                System.out.println("  [deploy] -> " + dest + " (exploded)");
+                runProcess(List.of(getJar(), "xf", jar.toAbsolutePath().toString()), dest);
             } else {
                 System.out.println("  [deploy] skipped: ECLIPSE_HOME not set.");
             }

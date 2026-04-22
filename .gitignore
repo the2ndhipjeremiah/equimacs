@@ -16,14 +16,7 @@
 RemoteSystemsTempFiles/
 .recommenders/
 
-# Local-only context engineering
-.context/
-
-# Agent Instruction Redirects
-CLAUDE.md
-AGENTS.md
-GEMINI.md
-
 # OS specific
 Thumbs.db
 .DS_Store
+

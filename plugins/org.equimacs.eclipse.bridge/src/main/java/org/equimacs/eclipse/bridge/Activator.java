@@ -2,7 +2,9 @@ package org.equimacs.eclipse.bridge;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.JsonSyntaxException;
+import com.google.gson.JsonDeserializer;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -26,8 +28,26 @@ public class Activator extends AbstractUIPlugin {
     public static final String PLUGIN_ID = "org.equimacs.eclipse.bridge";
     private static Activator plugin;
     private final DebugController controller = new DebugController();
-    private final Gson gson = new GsonBuilder().create();
-    private final ExecutorService serverExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final Gson gson = new GsonBuilder()
+        .registerTypeAdapter(Request.class, (JsonDeserializer<Request>) (json, typeOfT, context) -> {
+            JsonObject obj = json.getAsJsonObject();
+            if (!obj.has("type")) throw new JsonParseException("Missing 'type' field in Request");
+            String type = obj.get("type").getAsString();
+            return switch (type) {
+                case "SetBreakpoint" -> context.deserialize(obj, Request.SetBreakpoint.class);
+                case "ClearAllBreakpoints" -> context.deserialize(obj, Request.ClearAllBreakpoints.class);
+                case "Resume" -> context.deserialize(obj, Request.Resume.class);
+                case "Suspend" -> context.deserialize(obj, Request.Suspend.class);
+                case "Step" -> context.deserialize(obj, Request.Step.class);
+                case "GetWorkspace" -> context.deserialize(obj, Request.GetWorkspace.class);
+                case "GetThreads" -> context.deserialize(obj, Request.GetThreads.class);
+                case "GetStack" -> context.deserialize(obj, Request.GetStack.class);
+                case "GetVariables" -> context.deserialize(obj, Request.GetVariables.class);
+                default -> throw new JsonParseException("Unknown request type: " + type);
+            };
+        })
+        .create();
+    private final ExecutorService serverExecutor = Executors.newCachedThreadPool();
     private ServerSocketChannel serverChannel;
     private Path socketPath;
 
@@ -51,32 +71,42 @@ public class Activator extends AbstractUIPlugin {
             return;
         }
 
-        serverExecutor.submit(() -> {
-            try {
-                // Use a standard location for the Unix Domain Socket
-                String userHome = System.getProperty("user.home");
-                socketPath = Path.of(userHome, ".equimacs.sock");
-                
-                // Cleanup existing socket file if it exists
-                Files.deleteIfExists(socketPath);
+        try {
+            // Use a standard location for the Unix Domain Socket
+            String userHome = System.getProperty("user.home");
+            socketPath = Path.of(userHome, ".equimacs.sock");
+            
+            // Cleanup existing socket file if it exists
+            Files.deleteIfExists(socketPath);
 
-                serverChannel = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
-                serverChannel.bind(UnixDomainSocketAddress.of(socketPath));
-                
-                logInfo("Equimacs Listening on Unix Socket: " + socketPath);
+            serverChannel = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
+            serverChannel.bind(UnixDomainSocketAddress.of(socketPath));
+            
+            logInfo("Equimacs Listening on Unix Socket: " + socketPath);
 
-                while (serverChannel.isOpen()) {
-                    SocketChannel clientChannel = serverChannel.accept();
-                    serverExecutor.submit(() -> handleClient(clientChannel));
+            serverExecutor.submit(() -> {
+                try {
+                    while (serverChannel.isOpen()) {
+                        SocketChannel clientChannel = serverChannel.accept();
+                        serverExecutor.submit(() -> handleClient(clientChannel));
+                    }
+                } catch (IOException e) {
+                    if (serverChannel != null && serverChannel.isOpen()) {
+                        logError("Equimacs Server Error", e);
+                    }
+                } catch (Exception e) {
+                    logError("Equimacs Server Fatal Error", e);
+                } finally {
+                    logInfo("Equimacs Server Thread Stopped.");
                 }
-            } catch (IOException e) {
-                if (serverChannel != null && serverChannel.isOpen()) {
-                    logError("Equimacs Server Error", e);
-                }
-            } finally {
-                logInfo("Equimacs Server Thread Stopped.");
+            });
+        } catch (IOException e) {
+            logError("Failed to start Equimacs Server", e);
+            if (serverChannel != null) {
+                try { serverChannel.close(); } catch (IOException ignored) {}
+                serverChannel = null;
             }
-        });
+        }
     }
 
     public synchronized void stopServer() {
@@ -93,6 +123,10 @@ public class Activator extends AbstractUIPlugin {
         }
     }
 
+    public synchronized boolean isServerRunning() {
+        return serverChannel != null && serverChannel.isOpen();
+    }
+
     private void handleClient(SocketChannel clientChannel) {
         try (clientChannel;
              BufferedReader in = new BufferedReader(new InputStreamReader(Channels.newInputStream(clientChannel)));
@@ -106,7 +140,7 @@ public class Activator extends AbstractUIPlugin {
                     Request req = gson.fromJson(line, Request.class);
                     Response resp = dispatchRequest(req);
                     out.println(gson.toJson(resp));
-                } catch (JsonSyntaxException e) {
+                } catch (JsonParseException e) {
                     out.println(gson.toJson(new Response.Error("Invalid JSON: " + e.getMessage(), null)));
                 } catch (Exception e) {
                     out.println(gson.toJson(new Response.Error("Execution Error: " + e.getMessage(), null)));
@@ -146,6 +180,7 @@ public class Activator extends AbstractUIPlugin {
                     }
                     yield "Step executed";
                 }
+                case Request.GetWorkspace w -> "Not implemented yet"; // TODO
                 case Request.GetThreads t -> "Not implemented yet"; // TODO
                 case Request.GetStack s -> "Not implemented yet"; // TODO
                 case Request.GetVariables v -> "Not implemented yet"; // TODO

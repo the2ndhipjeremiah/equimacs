@@ -24,11 +24,11 @@ public class EquimacsMgr {
             "build", "Run the boring build (Build.java)",
             "deploy", "Build and deploy the bridge plugin to Eclipse dropins",
             "test-cli", "Run the Equimacs CLI (args: <cmd> [args...])",
-            "sync-context", "Force-sync private .context repository",
-            "list-context", "Raw directory listing of .context (bypasses gitignore)",
+            "sync-context", "Force-sync private context repository",
+            "list-context", "Raw directory listing of context (bypasses gitignore)",
             "clean", "Remove all build artifacts",
             "all", "Build and deploy everything",
-            "package", "Create standalone executable via jpackage",
+            "package", "Create standalone executables via jpackage",
             "reproduce", "Full deterministic cycle: clean -> build -> package"
         );
     }
@@ -116,9 +116,9 @@ public class EquimacsMgr {
     }
 
     private static void runSyncContext() throws Exception {
-        Path contextPath = REPO_ROOT.resolve(".context");
+        Path contextPath = REPO_ROOT.resolve("context");
         if (!Files.exists(contextPath.resolve(".git"))) {
-            throw new RuntimeException(".context is not a git repository.");
+            throw new RuntimeException("context is not a git repository.");
         }
         runProcess(List.of("git", "add", "-f", "."), contextPath);
         try {
@@ -130,7 +130,7 @@ public class EquimacsMgr {
     }
 
     private static List<String> runListContext() throws Exception {
-        Path contextPath = REPO_ROOT.resolve(".context");
+        Path contextPath = REPO_ROOT.resolve("context");
         List<String> files = new ArrayList<>();
         if (Files.exists(contextPath)) {
             try (var stream = Files.walk(contextPath)) {
@@ -148,66 +148,71 @@ public class EquimacsMgr {
         String[] targets = { "libs/protocol/build", "libs/cli/build", "plugins/org.equimacs.eclipse.bridge/build", "tools/cli/build", "tools/mgr/build" };
         for (String target : targets) {
             Path p = REPO_ROOT.resolve(target);
-            if (Files.exists(p)) deleteDir(p);
+            deleteDir(p);
         }
     }
 
     private static void runPackage() throws Exception {
-        System.out.println(">>> Packaging Equimacs CLI as an executable...");
-        
-        Path cliBuildDir = REPO_ROOT.resolve("tools/cli/build");
-        Path cliLibsDir = cliBuildDir.resolve("libs");
-        Path cliAppDir = cliBuildDir.resolve("app");
-        
-        if (Files.exists(cliLibsDir)) deleteDir(cliLibsDir);
-        if (Files.exists(cliAppDir)) deleteDir(cliAppDir);
-        
-        Path cliJar = cliLibsDir.resolve("equimacs-cli.jar");
-        Files.createDirectories(cliJar.getParent());
-
-        // 1. Create a Fat JAR for the CLI
-        Path cliOut = REPO_ROOT.resolve("tools/cli/build/classes");
+        Path gsonJar = REPO_ROOT.resolve("lib/gson.jar");
         Path cliLibOut = REPO_ROOT.resolve("libs/cli/build/classes");
-        Path protocolOut = REPO_ROOT.resolve("libs/protocol/build/classes");
         
-        // Explode GSON into a temp dir to include it in the Fat JAR
-        Path tmpExplode = REPO_ROOT.resolve("tools/cli/build/tmp_explode");
-        if (Files.exists(tmpExplode)) deleteDir(tmpExplode);
-        Files.createDirectories(tmpExplode);
-        runProcess(List.of(getJar(), "xf", REPO_ROOT.resolve("lib/gson.jar").toString()), tmpExplode);
+        // --- 1. Package Equimacs CLI ---
+        System.out.println(">>> Packaging Equimacs CLI...");
+        packageApp("equimacs", "org.equimacs.cli.EquimacsCLI", 
+            REPO_ROOT.resolve("tools/cli/build"),
+            List.of(REPO_ROOT.resolve("tools/cli/build/classes"), REPO_ROOT.resolve("libs/protocol/build/classes"), cliLibOut),
+            gsonJar);
 
-        runProcess(List.of(getJar(), "--create", "--file", cliJar.toString(),
-            "--main-class", "org.equimacs.cli.EquimacsCLI",
-            "-C", cliOut.toString(), ".",
-            "-C", cliLibOut.toString(), ".",
-            "-C", protocolOut.toString(), ".",
-            "-C", tmpExplode.toString(), "."), REPO_ROOT);
+        // --- 2. Package Equimacs Manager ---
+        System.out.println(">>> Packaging Equimacs Manager...");
+        packageApp("eqmgr", "org.equimacs.mgr.EquimacsMgr", 
+            REPO_ROOT.resolve("tools/mgr/build"),
+            List.of(REPO_ROOT.resolve("tools/mgr/build/classes"), cliLibOut),
+            gsonJar);
+    }
 
-        // 2. Use jpackage to create an EXE (Windows specific)
-        Path appOutBase = REPO_ROOT.resolve("tools/cli/build/app");
-        if (Files.exists(appOutBase)) deleteDir(appOutBase);
+    private static void packageApp(String name, String mainClass, Path buildDir, List<Path> classDirs, Path gsonJar) throws Exception {
+        Path libsDir = buildDir.resolve("libs");
+        Path appOutBase = buildDir.resolve("app");
+        deleteDir(libsDir);
+        deleteDir(appOutBase);
+        Files.createDirectories(libsDir);
         Files.createDirectories(appOutBase);
+
+        Path fatJar = libsDir.resolve(name + "-fat.jar");
         
+        // Explode GSON
+        Path tmpExplode = buildDir.resolve("tmp_explode");
+        deleteDir(tmpExplode);
+        Files.createDirectories(tmpExplode);
+        runProcess(List.of(getJar(), "xf", gsonJar.toString()), tmpExplode);
+
+        // Create Fat JAR
+        List<String> jarCmd = new ArrayList<>(List.of(getJar(), "--create", "--file", fatJar.toString(), "--main-class", mainClass));
+        for (Path dir : classDirs) {
+            jarCmd.addAll(List.of("-C", dir.toString(), "."));
+        }
+        jarCmd.addAll(List.of("-C", tmpExplode.toString(), "."));
+        runProcess(jarCmd, REPO_ROOT);
+
+        // Run jpackage in a temp dir to avoid Windows "already exists" errors
         Path jpackageTemp = Files.createTempDirectory(appOutBase, "jpackage-");
-        
         runProcess(List.of(
             Path.of(JAVA_HOME, "bin/jpackage").toString(),
             "--type", "app-image",
             "--dest", jpackageTemp.toString(),
-            "--name", "equimacs",
-            "--main-jar", "equimacs-cli.jar",
-            "--input", cliJar.getParent().toString(),
-            "--main-class", "org.equimacs.cli.EquimacsCLI",
+            "--name", name,
+            "--main-jar", fatJar.getFileName().toString(),
+            "--input", libsDir.toString(),
+            "--main-class", mainClass,
             "--vendor", "Equimacs"
         ), REPO_ROOT);
 
-        Path generatedApp = jpackageTemp.resolve("equimacs");
-        Path finalApp = appOutBase.resolve("equimacs");
-        if (Files.exists(finalApp)) deleteDir(finalApp);
-        Files.move(generatedApp, finalApp);
+        Path finalApp = appOutBase.resolve(name);
+        deleteDir(finalApp);
+        Files.move(jpackageTemp.resolve(name), finalApp, StandardCopyOption.REPLACE_EXISTING);
         deleteDir(jpackageTemp);
-
-        System.out.println("Executable created at: " + finalApp.resolve("equimacs.exe"));
+        System.out.println("Executable created at: " + finalApp.resolve(name + ".exe"));
     }
 
     private static void loadEnv() throws IOException {
@@ -241,8 +246,25 @@ public class EquimacsMgr {
     }
 
     private static void deleteDir(Path p) throws IOException {
-        try (var s = Files.walk(p)) {
-            s.sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(File::delete);
+        if (!Files.exists(p)) return;
+        
+        long start = System.currentTimeMillis();
+        while (System.currentTimeMillis() - start < 5000) { // 5 second timeout
+            try {
+                try (var s = Files.walk(p)) {
+                    var paths = s.sorted(Comparator.reverseOrder()).toList();
+                    for (Path path : paths) {
+                        Files.deleteIfExists(path);
+                    }
+                }
+                if (!Files.exists(p)) return;
+            } catch (IOException e) {
+                // Wait and retry
+                try { Thread.sleep(200); } catch (InterruptedException ignored) {}
+            }
+        }
+        if (Files.exists(p)) {
+            throw new IOException("Failed to delete directory after timeout: " + p);
         }
     }
 }

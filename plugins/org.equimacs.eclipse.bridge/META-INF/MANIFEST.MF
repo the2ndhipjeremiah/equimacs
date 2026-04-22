@@ -13,5 +13,5 @@ Require-Bundle: org.eclipse.ui,
  org.eclipse.jdt.core
 Bundle-ActivationPolicy: lazy
 Automatic-Module-Name: org.equimacs.eclipse.bridge
-Bundle-RequiredExecutionEnvironment: JavaSE-25
+Bundle-RequiredExecutionEnvironment: JavaSE-21
 Eclipse-BundleShape: dir
