@@ -2,6 +2,7 @@ import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.*;
+import java.util.zip.*;
 
 /**
  * Equimacs Boring Build.
@@ -11,6 +12,8 @@ public class Build {
     private static String ECLIPSE_HOME;
     private static String JAVA_HOME;
     private static final Path ROOT = Paths.get(".").toAbsolutePath().normalize();
+    private static final String BRIDGE_BUNDLE_ID = "org.equimacs.eclipse.bridge";
+    private static final String BRIDGE_BUNDLE_VERSION = "1.0.0.qualifier";
     private static final Map<String, String> LIBS = new LinkedHashMap<>();
 
     public static void main(String[] args) {
@@ -48,7 +51,7 @@ public class Build {
             Path out = ROOT.resolve("libs/cli/build/classes");
             if (Files.exists(out)) deleteDir(out);
             Files.createDirectories(out);
-            runProcess(List.of(getJavac(), "-d", out.toString(), "--release", "25",
+            runProcess(List.of(getJavac(), "-d", out.toString(), "--release", "26",
                 src.resolve("org/equimacs/cli/util/CliArgs.java").toString()));
         });
     }
@@ -60,7 +63,7 @@ public class Build {
             if (Files.exists(out)) deleteDir(out);
             Files.createDirectories(out);
 
-            runProcess(List.of(getJavac(), "-d", out.toString(), "--release", "25",
+            runProcess(List.of(getJavac(), "-d", out.toString(), "--release", "26",
                 src.resolve("org/equimacs/protocol/ProtocolSchema.java").toString(),
                 src.resolve("org/equimacs/protocol/Request.java").toString(),
                 src.resolve("org/equimacs/protocol/Response.java").toString()));
@@ -76,49 +79,72 @@ public class Build {
         step("bridge", () -> {
             Path bridgeDir = ROOT.resolve("plugins/org.equimacs.eclipse.bridge");
             Path src = bridgeDir.resolve("src/main/java");
-            Path generated = bridgeDir.resolve("build/generated-src");
             Path out = bridgeDir.resolve("build/classes");
             if (Files.exists(out)) deleteDir(out);
             Files.createDirectories(out);
-            if (Files.exists(generated)) deleteDir(generated);
-            Files.createDirectories(generated);
-
-            writeBridgeBuildInfo(generated);
 
             String cp = findEclipseJars();
             cp += File.pathSeparator + ROOT.resolve("libs/protocol/build/libs/protocol.jar");
             cp += File.pathSeparator + ROOT.resolve("libs/cli/build/classes");
             cp += File.pathSeparator + getLib("gson");
 
-            List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "25"));
+            List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "26"));
             try (Stream<Path> s = Files.walk(src)) {
-                s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
-            }
-            try (Stream<Path> s = Files.walk(generated)) {
                 s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
             }
             runProcess(javacCmd);
 
-            // Bnd Packaging
-            Path bndJar = Path.of(getLib("bnd"));
-            runProcess(List.of(getJava(), "-jar", bndJar.toAbsolutePath().toString(), "buildx", "bnd.bnd"), bridgeDir);
+            packageBridgeBundle(bridgeDir, out);
         });
     }
 
-    private static void writeBridgeBuildInfo(Path generatedRoot) throws IOException {
-        Path pkgDir = generatedRoot.resolve("org/equimacs/eclipse/bridge");
-        Files.createDirectories(pkgDir);
-        String stamp = java.time.ZonedDateTime.now().withNano(0).toString();
-        String content = """
-            package org.equimacs.eclipse.bridge;
+    private static void packageBridgeBundle(Path bridgeDir, Path classes) throws Exception {
+        Path staging = bridgeDir.resolve("build/bundle");
+        Path jarOut = bridgeDir.resolve("build/libs/org.equimacs.eclipse.bridge.jar");
 
-            final class BuildInfo {
-                static final String BUILD_STAMP = "%s";
+        deleteDir(staging);
+        Files.createDirectories(staging);
+        Files.createDirectories(jarOut.getParent());
 
-                private BuildInfo() {}
+        copyDir(classes, staging);
+        explodeJarInto(ROOT.resolve("libs/protocol/build/libs/protocol.jar"), staging);
+        explodeJarInto(ROOT.resolve("lib/gson.jar"), staging);
+        Files.copy(bridgeDir.resolve("plugin.xml"), staging.resolve("plugin.xml"), StandardCopyOption.REPLACE_EXISTING);
+
+        Files.deleteIfExists(jarOut);
+        runProcess(List.of(getJar(), "--create",
+            "--file", jarOut.toString(),
+            "--manifest", bridgeDir.resolve("META-INF/MANIFEST.MF").toString(),
+            "-C", staging.toString(), "."));
+    }
+
+    private static void explodeJarInto(Path jar, Path dest) throws IOException {
+        try (ZipInputStream in = new ZipInputStream(Files.newInputStream(jar))) {
+            for (ZipEntry entry; (entry = in.getNextEntry()) != null; ) {
+                String name = entry.getName();
+                if (name.equalsIgnoreCase("META-INF/MANIFEST.MF") || isJarSignatureMetadata(name)) {
+                    continue;
+                }
+
+                Path out = dest.resolve(name).normalize();
+                if (!out.startsWith(dest)) {
+                    throw new IOException("Refusing to extract outside bundle staging: " + name);
+                }
+
+                if (entry.isDirectory()) {
+                    Files.createDirectories(out);
+                } else {
+                    Files.createDirectories(out.getParent());
+                    Files.copy(in, out, StandardCopyOption.REPLACE_EXISTING);
+                }
             }
-            """.formatted(stamp);
-        Files.writeString(pkgDir.resolve("BuildInfo.java"), content);
+        }
+    }
+
+    private static boolean isJarSignatureMetadata(String name) {
+        String upper = name.toUpperCase(Locale.ROOT);
+        return upper.startsWith("META-INF/")
+            && (upper.endsWith(".SF") || upper.endsWith(".RSA") || upper.endsWith(".DSA") || upper.endsWith(".EC"));
     }
 
     private static void buildCLI() throws Exception {
@@ -131,7 +157,7 @@ public class Build {
             String cp = ROOT.resolve("libs/protocol/build/libs/protocol.jar") + 
                         File.pathSeparator + ROOT.resolve("libs/cli/build/classes") + 
                         File.pathSeparator + getLib("gson");
-            runProcess(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "25",
+            runProcess(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "26",
                 src.resolve("org/equimacs/cli/EquimacsCLI.java").toString()));
         });
     }
@@ -144,7 +170,7 @@ public class Build {
             Files.createDirectories(out);
 
             String cp = ROOT.resolve("libs/cli/build/classes") + File.pathSeparator + getLib("gson");
-            runProcess(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "25",
+            runProcess(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "26",
                 src.resolve("org/equimacs/mgr/EquimacsMgr.java").toString()));
         });
     }
@@ -278,15 +304,58 @@ public class Build {
         if (Files.exists(jar)) {
             if (ECLIPSE_HOME != null) {
                 Path dropins = Path.of(ECLIPSE_HOME, "dropins");
-                Path dest = dropins.resolve("org.equimacs.eclipse.bridge");
+                Path dest = dropins.resolve(BRIDGE_BUNDLE_ID);
                 if (Files.exists(dest)) deleteDir(dest);
                 Files.createDirectories(dest);
                 
                 System.out.println("  [deploy] -> " + dest + " (exploded)");
                 runProcess(List.of(getJar(), "xf", jar.toAbsolutePath().toString()), dest);
+                installBridgeIntoSimpleConfigurator(jar);
             } else {
                 System.out.println("  [deploy] skipped: ECLIPSE_HOME not set.");
             }
+        }
+    }
+
+    private static void installBridgeIntoSimpleConfigurator(Path jar) throws IOException {
+        Path eclipse = Path.of(ECLIPSE_HOME);
+        Path plugins = eclipse.resolve("plugins");
+        Files.createDirectories(plugins);
+
+        String installedName = BRIDGE_BUNDLE_ID + "_" + BRIDGE_BUNDLE_VERSION + "-" + System.currentTimeMillis() + ".jar";
+        Path installedJar = plugins.resolve(installedName);
+        Files.copy(jar, installedJar, StandardCopyOption.REPLACE_EXISTING);
+        cleanOldInstalledBridgeJars(plugins, installedName);
+
+        Path bundlesInfo = eclipse.resolve("configuration/org.eclipse.equinox.simpleconfigurator/bundles.info");
+        Files.createDirectories(bundlesInfo.getParent());
+
+        String entry = BRIDGE_BUNDLE_ID + "," + BRIDGE_BUNDLE_VERSION + ",plugins/" + installedName + ",4,true";
+        List<String> lines = Files.exists(bundlesInfo)
+            ? new ArrayList<>(Files.readAllLines(bundlesInfo))
+            : new ArrayList<>(List.of("#encoding=UTF-8", "#version=1"));
+
+        lines.removeIf(line -> line.startsWith(BRIDGE_BUNDLE_ID + ","));
+        lines.add(entry);
+        Files.write(bundlesInfo, lines);
+        System.out.println("  [deploy] -> " + installedJar + " (simpleconfigurator)");
+    }
+
+    private static void cleanOldInstalledBridgeJars(Path plugins, String keepName) throws IOException {
+        try (Stream<Path> stream = Files.list(plugins)) {
+            stream.filter(p -> {
+                    String name = p.getFileName().toString();
+                    return name.startsWith(BRIDGE_BUNDLE_ID + "_" + BRIDGE_BUNDLE_VERSION)
+                        && name.endsWith(".jar")
+                        && !name.equals(keepName);
+                })
+                .forEach(p -> {
+                    try {
+                        Files.deleteIfExists(p);
+                    } catch (IOException ignored) {
+                        // Eclipse can lock the currently loaded bridge jar until restart.
+                    }
+                });
         }
     }
 
@@ -358,7 +427,6 @@ public class Build {
 
     private static String getJavac() { return JAVA_HOME != null ? Path.of(JAVA_HOME, "bin/javac").toString() : "javac"; }
     private static String getJar() { return JAVA_HOME != null ? Path.of(JAVA_HOME, "bin/jar").toString() : "jar"; }
-    private static String getJava() { return JAVA_HOME != null ? Path.of(JAVA_HOME, "bin/java").toString() : "java"; }
 
     private static void runProcess(List<String> args) throws Exception { runProcess(args, ROOT); }
     private static void runProcess(List<String> args, Path dir) throws Exception {
@@ -379,6 +447,22 @@ public class Build {
     }
 
     private static void ensureLibDir() throws IOException { Files.createDirectories(ROOT.resolve("lib")); }
+
+    private static void copyDir(Path source, Path target) throws IOException {
+        try (var s = Files.walk(source)) {
+            for (Path p : s.toList()) {
+                Path relative = source.relativize(p);
+                Path dest = target.resolve(relative);
+                if (Files.isDirectory(p)) {
+                    Files.createDirectories(dest);
+                } else {
+                    Files.createDirectories(dest.getParent());
+                    Files.copy(p, dest, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        }
+    }
+
     private static void deleteDir(Path p) throws IOException {
         if (!Files.exists(p)) return;
         try (var s = Files.walk(p)) {

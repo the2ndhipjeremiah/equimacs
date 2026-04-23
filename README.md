@@ -54,6 +54,8 @@ eqm-mgr deploy
 eqm-mgr test-cli <cmd> [args...]
 eqm-mgr sync-context
 eqm-mgr list-context
+eqm-mgr diagnose
+eqm-mgr logs
 eqm-mgr clean
 eqm-mgr all
 eqm-mgr package

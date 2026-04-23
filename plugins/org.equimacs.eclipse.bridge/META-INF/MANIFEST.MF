@@ -4,8 +4,12 @@ Bundle-Name: Equimacs Eclipse Bridge
 Bundle-SymbolicName: org.equimacs.eclipse.bridge;singleton:=true
 Bundle-Version: 1.0.0.qualifier
 Bundle-Activator: org.equimacs.eclipse.bridge.Activator
+Bundle-ClassPath: .
 Require-Bundle: org.eclipse.ui,
  org.eclipse.ui.ide,
+ org.eclipse.core.commands,
+ org.eclipse.jface,
+ org.eclipse.swt,
  org.eclipse.core.runtime,
  org.eclipse.debug.core,
  org.eclipse.jdt.debug,
@@ -15,5 +19,5 @@ Require-Bundle: org.eclipse.ui,
  org.apache.felix.gogo.runtime
 Bundle-ActivationPolicy: lazy
 Automatic-Module-Name: org.equimacs.eclipse.bridge
-Bundle-RequiredExecutionEnvironment: JavaSE-25
+Bundle-RequiredExecutionEnvironment: JavaSE-26
 Eclipse-BundleShape: dir

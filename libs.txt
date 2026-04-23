@@ -1,2 +1,1 @@
 gson=https://repo1.maven.org/maven2/com/google/code/gson/gson/2.11.0/gson-2.11.0.jar
-bnd=https://repo1.maven.org/maven2/biz/aQute/bnd/biz.aQute.bnd/7.2.3/biz.aQute.bnd-7.2.3.jar
