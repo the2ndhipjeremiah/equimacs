@@ -1,1 +1,2 @@
 gson=https://repo1.maven.org/maven2/com/google/code/gson/gson/2.11.0/gson-2.11.0.jar
+osgi-annotations=https://repo1.maven.org/maven2/org/osgi/org.osgi.service.component.annotations/1.5.1/org.osgi.service.component.annotations-1.5.1.jar

@@ -17,6 +17,10 @@ Require-Bundle: org.eclipse.ui,
  org.eclipse.core.resources,
  org.eclipse.jdt.core,
  org.apache.felix.gogo.runtime
+Export-Package: org.equimacs.eclipse.bridge.api,
+ org.equimacs.protocol,
+ com.google.gson
+Service-Component: OSGI-INF/BridgeServiceImpl.xml
 Bundle-ActivationPolicy: lazy
 Automatic-Module-Name: org.equimacs.eclipse.bridge
 Bundle-RequiredExecutionEnvironment: JavaSE-26

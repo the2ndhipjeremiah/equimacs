@@ -1,0 +1,13 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: Equimacs Debug
+Bundle-SymbolicName: org.equimacs.debug;singleton:=true
+Bundle-Version: 1.0.0.qualifier
+Bundle-ClassPath: .
+Import-Package: org.equimacs.eclipse.bridge.api,
+ org.equimacs.protocol,
+ com.google.gson
+Service-Component: OSGI-INF/DebugCommandHandler.xml
+Bundle-RequiredExecutionEnvironment: JavaSE-26
+Eclipse-BundleShape: dir
+Automatic-Module-Name: org.equimacs.debug

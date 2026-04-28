@@ -14,6 +14,8 @@ public class Build {
     private static final Path ROOT = Paths.get(".").toAbsolutePath().normalize();
     private static final String BRIDGE_BUNDLE_ID = "org.equimacs.eclipse.bridge";
     private static final String BRIDGE_BUNDLE_VERSION = "1.0.0.qualifier";
+    private static final String DEBUG_BUNDLE_ID = "org.equimacs.debug";
+    private static final String DEBUG_BUNDLE_VERSION = "1.0.0.qualifier";
     private static final Map<String, String> LIBS = new LinkedHashMap<>();
 
     public static void main(String[] args) {
@@ -31,6 +33,7 @@ public class Build {
             buildCliLib();
             buildProtocol();
             buildBridge();
+            buildDebug();
             buildCLI();
             buildMgr();
             packageAll();
@@ -87,6 +90,7 @@ public class Build {
             cp += File.pathSeparator + ROOT.resolve("libs/protocol/build/libs/protocol.jar");
             cp += File.pathSeparator + ROOT.resolve("libs/cli/build/classes");
             cp += File.pathSeparator + getLib("gson");
+            cp += File.pathSeparator + getLib("osgi-annotations");
 
             List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "26"));
             try (Stream<Path> s = Files.walk(src)) {
@@ -95,6 +99,29 @@ public class Build {
             runProcess(javacCmd);
 
             packageBridgeBundle(bridgeDir, out);
+        });
+    }
+
+    private static void buildDebug() throws Exception {
+        step("debug", () -> {
+            Path debugDir = ROOT.resolve("plugins/org.equimacs.debug");
+            Path src = debugDir.resolve("src/main/java");
+            Path out = debugDir.resolve("build/classes");
+            if (Files.exists(out)) deleteDir(out);
+            Files.createDirectories(out);
+
+            String cp = ROOT.resolve("plugins/org.equimacs.eclipse.bridge/build/classes")
+                + File.pathSeparator + ROOT.resolve("libs/protocol/build/libs/protocol.jar")
+                + File.pathSeparator + getLib("gson")
+                + File.pathSeparator + getLib("osgi-annotations");
+
+            List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "26"));
+            try (Stream<Path> s = Files.walk(src)) {
+                s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
+            }
+            runProcess(javacCmd);
+
+            packageDebugBundle(debugDir, out);
         });
     }
 
@@ -110,12 +137,38 @@ public class Build {
         explodeJarInto(ROOT.resolve("libs/protocol/build/libs/protocol.jar"), staging);
         explodeJarInto(ROOT.resolve("lib/gson.jar"), staging);
         Files.copy(bridgeDir.resolve("plugin.xml"), staging.resolve("plugin.xml"), StandardCopyOption.REPLACE_EXISTING);
+        copyOsgiInf(bridgeDir, staging);
 
         Files.deleteIfExists(jarOut);
         runProcess(List.of(getJar(), "--create",
             "--file", jarOut.toString(),
             "--manifest", bridgeDir.resolve("META-INF/MANIFEST.MF").toString(),
             "-C", staging.toString(), "."));
+    }
+
+    private static void packageDebugBundle(Path debugDir, Path classes) throws Exception {
+        Path staging = debugDir.resolve("build/bundle");
+        Path jarOut = debugDir.resolve("build/libs/org.equimacs.debug.jar");
+
+        deleteDir(staging);
+        Files.createDirectories(staging);
+        Files.createDirectories(jarOut.getParent());
+
+        copyDir(classes, staging);
+        copyOsgiInf(debugDir, staging);
+
+        Files.deleteIfExists(jarOut);
+        runProcess(List.of(getJar(), "--create",
+            "--file", jarOut.toString(),
+            "--manifest", debugDir.resolve("META-INF/MANIFEST.MF").toString(),
+            "-C", staging.toString(), "."));
+    }
+
+    private static void copyOsgiInf(Path bundleDir, Path staging) throws IOException {
+        Path osgiInf = bundleDir.resolve("OSGI-INF");
+        if (Files.exists(osgiInf)) {
+            copyDir(osgiInf, staging.resolve("OSGI-INF"));
+        }
     }
 
     private static void explodeJarInto(Path jar, Path dest) throws IOException {
@@ -300,52 +353,63 @@ public class Build {
     }
 
     private static void copyToDropins() throws Exception {
-        Path jar = ROOT.resolve("plugins/org.equimacs.eclipse.bridge/build/libs/org.equimacs.eclipse.bridge.jar");
-        if (Files.exists(jar)) {
-            if (ECLIPSE_HOME != null) {
-                Path dropins = Path.of(ECLIPSE_HOME, "dropins");
-                Path dest = dropins.resolve(BRIDGE_BUNDLE_ID);
-                if (Files.exists(dest)) deleteDir(dest);
-                Files.createDirectories(dest);
-                
-                System.out.println("  [deploy] -> " + dest + " (exploded)");
-                runProcess(List.of(getJar(), "xf", jar.toAbsolutePath().toString()), dest);
-                installBridgeIntoSimpleConfigurator(jar);
-            } else {
-                System.out.println("  [deploy] skipped: ECLIPSE_HOME not set.");
-            }
+        if (ECLIPSE_HOME == null) {
+            System.out.println("  [deploy] skipped: ECLIPSE_HOME not set.");
+            return;
         }
+        deployBundle(BRIDGE_BUNDLE_ID, BRIDGE_BUNDLE_VERSION,
+            ROOT.resolve("plugins/org.equimacs.eclipse.bridge/build/libs/org.equimacs.eclipse.bridge.jar"));
+        deployBundle(DEBUG_BUNDLE_ID, DEBUG_BUNDLE_VERSION,
+            ROOT.resolve("plugins/org.equimacs.debug/build/libs/org.equimacs.debug.jar"));
     }
 
-    private static void installBridgeIntoSimpleConfigurator(Path jar) throws IOException {
+    private static void deployBundle(String bundleId, String version, Path jar) throws IOException {
+        if (!Files.exists(jar)) return;
+
+        Path dropins = Path.of(ECLIPSE_HOME, "dropins");
+        Path dest = dropins.resolve(bundleId);
+        if (Files.exists(dest)) deleteDir(dest);
+        Files.createDirectories(dest);
+
+        System.out.println("  [deploy] -> " + dest + " (exploded)");
+        try {
+            runProcess(List.of(getJar(), "xf", jar.toAbsolutePath().toString()), dest);
+        } catch (Exception e) {
+            throw new IOException("Failed to extract " + jar, e);
+        }
+        installBundleIntoSimpleConfigurator(bundleId, version, jar);
+    }
+
+    private static void installBundleIntoSimpleConfigurator(String bundleId, String version, Path jar) throws IOException {
         Path eclipse = Path.of(ECLIPSE_HOME);
         Path plugins = eclipse.resolve("plugins");
         Files.createDirectories(plugins);
 
-        String installedName = BRIDGE_BUNDLE_ID + "_" + BRIDGE_BUNDLE_VERSION + "-" + System.currentTimeMillis() + ".jar";
+        String installedName = bundleId + "_" + version + "-" + System.currentTimeMillis() + ".jar";
         Path installedJar = plugins.resolve(installedName);
         Files.copy(jar, installedJar, StandardCopyOption.REPLACE_EXISTING);
-        cleanOldInstalledBridgeJars(plugins, installedName);
+        cleanOldInstalledBundleJars(plugins, bundleId, version, installedName);
 
         Path bundlesInfo = eclipse.resolve("configuration/org.eclipse.equinox.simpleconfigurator/bundles.info");
         Files.createDirectories(bundlesInfo.getParent());
 
-        String entry = BRIDGE_BUNDLE_ID + "," + BRIDGE_BUNDLE_VERSION + ",plugins/" + installedName + ",4,true";
+        String entry = bundleId + "," + version + ",plugins/" + installedName + ",4,true";
         List<String> lines = Files.exists(bundlesInfo)
             ? new ArrayList<>(Files.readAllLines(bundlesInfo))
             : new ArrayList<>(List.of("#encoding=UTF-8", "#version=1"));
 
-        lines.removeIf(line -> line.startsWith(BRIDGE_BUNDLE_ID + ","));
+        lines.removeIf(line -> line.startsWith(bundleId + ","));
         lines.add(entry);
         Files.write(bundlesInfo, lines);
         System.out.println("  [deploy] -> " + installedJar + " (simpleconfigurator)");
     }
 
-    private static void cleanOldInstalledBridgeJars(Path plugins, String keepName) throws IOException {
+    private static void cleanOldInstalledBundleJars(Path plugins, String bundleId, String version, String keepName) throws IOException {
+        String prefix = bundleId + "_" + version;
         try (Stream<Path> stream = Files.list(plugins)) {
             stream.filter(p -> {
                     String name = p.getFileName().toString();
-                    return name.startsWith(BRIDGE_BUNDLE_ID + "_" + BRIDGE_BUNDLE_VERSION)
+                    return name.startsWith(prefix)
                         && name.endsWith(".jar")
                         && !name.equals(keepName);
                 })
@@ -353,7 +417,7 @@ public class Build {
                     try {
                         Files.deleteIfExists(p);
                     } catch (IOException ignored) {
-                        // Eclipse can lock the currently loaded bridge jar until restart.
+                        // Eclipse can lock the currently loaded bundle jar until restart.
                     }
                 });
         }

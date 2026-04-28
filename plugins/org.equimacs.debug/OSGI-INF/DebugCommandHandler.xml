@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<scr:component xmlns:scr="http://www.osgi.org/xmlns/scr/v1.4.0"
+               name="org.equimacs.debug.DebugCommandHandler"
+               immediate="true"
+               activate="activate"
+               deactivate="deactivate">
+   <implementation class="org.equimacs.debug.DebugCommandHandler"/>
+   <service>
+      <provide interface="org.equimacs.eclipse.bridge.api.IBridgeCommandHandler"/>
+   </service>
+   <property name="equimacs.commands" type="String" value="Ping"/>
+   <reference name="bridge"
+              interface="org.equimacs.eclipse.bridge.api.IBridgeService"
+              cardinality="1..1"
+              policy="static"
+              bind="setBridge"
+              unbind="unsetBridge"/>
+</scr:component>

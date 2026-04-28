@@ -1,8 +1,17 @@
 package org.equimacs.eclipse.bridge;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalTime;
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
+import org.eclipse.core.runtime.Platform;
 import org.equimacs.protocol.Request;
 import org.equimacs.protocol.Response;
 import org.osgi.framework.Bundle;
@@ -91,12 +100,69 @@ final class BridgeRequestDispatcher {
         new Thread(() -> {
             try {
                 Thread.sleep(300);
-                self.update();
-                system.adapt(FrameworkWiring.class).refreshBundles(Collections.singleton(self));
+                List<Bundle> updated = updateEquimacsBundles(bundleContext);
+                if (updated.isEmpty()) {
+                    self.update();
+                    updated = List.of(self);
+                }
+                system.adapt(FrameworkWiring.class).refreshBundles(updated);
             } catch (Exception e) {
                 Activator.logError("Reload failed", e);
             }
         }, "equimacs-reload").start();
         return "Reloading... [" + LocalTime.now().withNano(0) + "]";
+    }
+
+    private static List<Bundle> updateEquimacsBundles(BundleContext ctx) throws IOException {
+        // Eclipse may hold the original install jar locked on Windows, and our
+        // build cleanup may delete the old jar after writing a new timestamped
+        // one. Either way, the bundle's install URL becomes stale. Read every
+        // equimacs entry from bundles.info and update the corresponding running
+        // bundle from the freshly built jar via update(InputStream).
+        Map<String, Path> latest = readEquimacsJarsFromBundlesInfo();
+        List<Bundle> updated = new ArrayList<>();
+        for (Bundle bundle : ctx.getBundles()) {
+            String name = bundle.getSymbolicName();
+            if (name == null || !name.startsWith("org.equimacs.")) continue;
+            Path jar = latest.get(name);
+            if (jar == null) continue;
+            Activator.logInfo("Reload: updating " + name + " from " + jar);
+            try (InputStream in = Files.newInputStream(jar)) {
+                bundle.update(in);
+            } catch (Exception e) {
+                Activator.logError("Reload: failed to update " + name + " from " + jar, e);
+                continue;
+            }
+            updated.add(bundle);
+        }
+        return updated;
+    }
+
+    private static Map<String, Path> readEquimacsJarsFromBundlesInfo() throws IOException {
+        Path eclipse = locateEclipseInstall();
+        if (eclipse == null) return Map.of();
+        Path bundlesInfo = eclipse.resolve("configuration/org.eclipse.equinox.simpleconfigurator/bundles.info");
+        if (!Files.exists(bundlesInfo)) return Map.of();
+
+        Map<String, Path> latest = new LinkedHashMap<>();
+        for (String line : Files.readAllLines(bundlesInfo)) {
+            if (line.isBlank() || line.startsWith("#")) continue;
+            String[] parts = line.split(",", -1);
+            if (parts.length < 3) continue;
+            String name = parts[0];
+            if (!name.startsWith("org.equimacs.")) continue;
+            Path jar = eclipse.resolve(parts[2]);
+            if (Files.exists(jar)) latest.put(name, jar);
+        }
+        return latest;
+    }
+
+    private static Path locateEclipseInstall() {
+        try {
+            URL url = Platform.getInstallLocation().getURL();
+            return Path.of(url.toURI());
+        } catch (Exception e) {
+            return null;
+        }
     }
 }
