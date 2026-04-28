@@ -1,4 +1,4 @@
-package org.equimacs.eclipse.bridge;
+package org.equimacs.debug;
 
 // Placeholder for CDT (C/C++) debug operations.
 // JDT and CDT have incompatible breakpoint/thread APIs — they are intentionally separate.

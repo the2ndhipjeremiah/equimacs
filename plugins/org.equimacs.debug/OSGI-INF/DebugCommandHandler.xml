@@ -8,7 +8,29 @@
    <service>
       <provide interface="org.equimacs.eclipse.bridge.api.IBridgeCommandHandler"/>
    </service>
-   <property name="equimacs.commands" type="String" value="Ping"/>
+   <property name="equimacs.commands" type="String">
+SetBreakpoint
+ClearAllBreakpoints
+ListBreakpoints
+Resume
+Suspend
+Step
+GetWorkspace
+GetThreads
+GetStack
+GetVariables
+GetProblems
+Build
+GetQuickFixes
+ApplyFix
+GetClasspath
+GetProjectDescription
+RefreshProject
+Launch
+ListLaunches
+ListSessions
+Terminate
+   </property>
    <reference name="bridge"
               interface="org.equimacs.eclipse.bridge.api.IBridgeService"
               cardinality="1..1"

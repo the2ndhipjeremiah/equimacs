@@ -1,22 +1,12 @@
-package org.equimacs.eclipse.bridge;
+package org.equimacs.debug;
 
-import com.google.gson.Gson;
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.io.PrintStream;
 import com.google.gson.JsonObject;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
-import org.apache.felix.service.command.CommandProcessor;
-import org.apache.felix.service.command.CommandSession;
-import org.osgi.framework.BundleContext;
-import org.osgi.framework.ServiceReference;
+import java.util.function.Consumer;
 import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
@@ -52,14 +42,20 @@ import org.eclipse.jdt.debug.core.IJavaStackFrame;
 import org.eclipse.jdt.debug.core.JDIDebugModel;
 
 public class JavaDebugController {
+    private static final String PLUGIN_ID = "org.equimacs.debug";
     private static final NullProgressMonitor NULL_MONITOR = new NullProgressMonitor();
 
     private final Map<Long, IThread> threadRegistry = new ConcurrentHashMap<>();
     private final Map<Long, IStackFrame> frameRegistry = new ConcurrentHashMap<>();
-    private final BlockingQueue<JsonObject> eventQueue = new LinkedBlockingQueue<>();
 
-    public void init() {
-        DebugPlugin.getDefault().addDebugEventListener(events -> {
+    private volatile Consumer<JsonObject> eventSink;
+    private IDebugEventSetListener listener;
+
+    public void init(Consumer<JsonObject> eventSink) {
+        this.eventSink = eventSink;
+        this.listener = events -> {
+            Consumer<JsonObject> sink = this.eventSink;
+            if (sink == null) return;
             for (DebugEvent event : events) {
                 if (event.getKind() == DebugEvent.SUSPEND && event.getSource() instanceof IThread thread) {
                     JsonObject ev = new JsonObject();
@@ -77,14 +73,26 @@ public class JavaDebugController {
                             }
                         }
                     } catch (Exception ignored) {}
-                    eventQueue.offer(ev);
+                    sink.accept(ev);
                 } else if (event.getKind() == DebugEvent.TERMINATE) {
                     JsonObject ev = new JsonObject();
                     ev.addProperty("event", "Terminated");
-                    eventQueue.offer(ev);
+                    sink.accept(ev);
                 }
             }
-        });
+        };
+        DebugPlugin.getDefault().addDebugEventListener(listener);
+    }
+
+    public void dispose() {
+        if (listener != null) {
+            DebugPlugin plugin = DebugPlugin.getDefault();
+            if (plugin != null) plugin.removeDebugEventListener(listener);
+            listener = null;
+        }
+        eventSink = null;
+        threadRegistry.clear();
+        frameRegistry.clear();
     }
 
     // --- Breakpoints ---
@@ -97,9 +105,6 @@ public class JavaDebugController {
         if (condition != null && !condition.isBlank()) {
             bp.setCondition(condition);
             bp.setConditionEnabled(true);
-            Activator.logInfo("Java Conditional Breakpoint Set: " + typeName + ":" + lineNumber + " if (" + condition + ")");
-        } else {
-            Activator.logInfo("Java Breakpoint Set: " + typeName + ":" + lineNumber);
         }
     }
 
@@ -125,7 +130,6 @@ public class JavaDebugController {
     public void clearAllBreakpoints() throws CoreException {
         IBreakpointManager manager = DebugPlugin.getDefault().getBreakpointManager();
         manager.removeBreakpoints(manager.getBreakpoints(), true);
-        Activator.logInfo("All breakpoints cleared.");
     }
 
     // --- Execution Control ---
@@ -333,7 +337,6 @@ public class JavaDebugController {
     public String refreshProject(String projectName) throws CoreException {
         IProject project = requireProject(projectName);
         project.refreshLocal(IResource.DEPTH_INFINITE, NULL_MONITOR);
-        // Re-apply the project description to force nature re-validation
         org.eclipse.core.resources.IProjectDescription desc = project.getDescription();
         project.setDescription(desc, NULL_MONITOR);
         return "Refreshed: " + projectName;
@@ -379,18 +382,6 @@ public class JavaDebugController {
         }
         ResourcesPlugin.getWorkspace().build(buildKind, NULL_MONITOR);
         return "Workspace build complete";
-    }
-
-    // --- Event Streaming ---
-
-    public JsonObject waitEvent(int timeoutMs) throws InterruptedException {
-        JsonObject event = eventQueue.poll(timeoutMs, TimeUnit.MILLISECONDS);
-        if (event == null) {
-            JsonObject timeout = new JsonObject();
-            timeout.addProperty("event", "Timeout");
-            return timeout;
-        }
-        return event;
     }
 
     // --- Launch ---
@@ -441,62 +432,6 @@ public class JavaDebugController {
         return "Terminated " + count + " session(s)";
     }
 
-    // --- OSGi Shell ---
-
-    public String executeGogo(String command, BundleContext ctx) throws Exception {
-        ServiceReference<CommandProcessor> ref = ctx.getServiceReference(CommandProcessor.class);
-        if (ref == null) throw new Exception("Gogo CommandProcessor service not found");
-        CommandProcessor processor = ctx.getService(ref);
-        try {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            PrintStream out = new PrintStream(baos, true, "UTF-8");
-            try (CommandSession session = processor.createSession(InputStream.nullInputStream(), out, out)) {
-                Object result = session.execute(command);
-                out.flush();
-                String output = baos.toString("UTF-8").trim();
-                // stdout itself may be a raw object ref (command printed its return value)
-                if (isRawRefString(output)) output = "(unserializable: " + extractClassName(output) + ")";
-                if (result != null) {
-                    String rs;
-                    if (looksLikeRawRef(result)) {
-                        String json = new Gson().toJson(result);
-                        rs = isTriviallyEmpty(json)
-                            ? "(unserializable: " + result.getClass().getSimpleName() + ")"
-                            : json;
-                    } else {
-                        rs = result.toString();
-                    }
-                    if (!rs.isEmpty()) output = output.isEmpty() ? rs : output + "\n" + rs;
-                }
-                return output.isEmpty() ? "(no output)" : output;
-            }
-        } finally {
-            ctx.ungetService(ref);
-        }
-    }
-
-    private static boolean looksLikeRawRef(Object o) {
-        if (o.getClass().isArray()) return true;
-        return isRawRefString(o.toString());
-    }
-
-    private static boolean isRawRefString(String s) {
-        return s.matches("\\[?[\\w.$]+@[0-9a-f]{6,}\\]?");
-    }
-
-    private static String extractClassName(String rawRef) {
-        // "[pkg.Outer$Inner@abc123]" -> "Outer$Inner"
-        String stripped = rawRef.replaceAll("^\\[|\\]$", "");
-        String className = stripped.contains("@") ? stripped.substring(0, stripped.indexOf('@')) : stripped;
-        int dot = className.lastIndexOf('.');
-        return dot >= 0 ? className.substring(dot + 1) : className;
-    }
-
-    private static boolean isTriviallyEmpty(String json) {
-        String trimmed = json.replaceAll("\\s", "");
-        return trimmed.equals("{}") || trimmed.equals("[]") || trimmed.matches("\\[\\{(\"\\w+\":\\{\\}(,\"\\w+\":\\{\\})*)?\\}\\]");
-    }
-
     // --- Helpers ---
 
     private IResource resolveResource(String pathStr) {
@@ -542,10 +477,7 @@ public class JavaDebugController {
             } catch (org.eclipse.jdt.core.JavaModelException ignored) {}
         }
         String name = resource.getName();
-        String simpleName = name.substring(0, name.lastIndexOf('.'));
-        Activator.logError("Could not resolve fully-qualified type name for " + resource.getFullPath()
-            + ", falling back to '" + simpleName + "'.", null);
-        return simpleName;
+        return name.substring(0, name.lastIndexOf('.'));
     }
 
     private void executeOnActiveTarget(TargetAction action) throws CoreException {
@@ -572,7 +504,7 @@ public class JavaDebugController {
     }
 
     private CoreException error(String message) {
-        return new CoreException(new Status(IStatus.ERROR, Activator.PLUGIN_ID, message));
+        return new CoreException(new Status(IStatus.ERROR, PLUGIN_ID, message));
     }
 
     @FunctionalInterface interface TargetAction { void run(IDebugTarget target) throws CoreException; }

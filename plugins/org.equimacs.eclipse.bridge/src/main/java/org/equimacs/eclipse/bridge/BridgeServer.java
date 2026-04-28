@@ -16,21 +16,22 @@ import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import org.equimacs.protocol.Request;
 import org.equimacs.protocol.Response;
 
-final class BridgeServer {
+public final class BridgeServer {
     private final Gson gson = BridgeProtocol.createGson();
-    private final BridgeRequestDispatcher dispatcher;
+    private final Function<Request, Response> dispatcher;
     private ExecutorService serverExecutor = Executors.newCachedThreadPool();
     private volatile ServerSocketChannel serverChannel;
     private volatile Path socketPath;
 
-    BridgeServer(BridgeRequestDispatcher dispatcher) {
+    public BridgeServer(Function<Request, Response> dispatcher) {
         this.dispatcher = dispatcher;
     }
 
-    synchronized void start() throws IOException {
+    public synchronized void start() throws IOException {
         if (isRunning()) {
             Activator.logInfo("BridgeServer.start skipped: already running on " + socketPath);
             Activator.traceLifecycle("BridgeServer.start skipped: already running on " + socketPath);
@@ -54,7 +55,7 @@ final class BridgeServer {
         serverExecutor.submit(this::acceptLoop);
     }
 
-    synchronized void stop() throws IOException {
+    public synchronized void stop() throws IOException {
         IOException failure = null;
         Activator.logInfo("BridgeServer.stop requested for " + socketPath);
         Activator.traceLifecycle("BridgeServer.stop requested for " + socketPath);
@@ -84,7 +85,7 @@ final class BridgeServer {
         }
     }
 
-    boolean isRunning() {
+    public boolean isRunning() {
         ServerSocketChannel channel = serverChannel;
         return channel != null && channel.isOpen();
     }
@@ -133,7 +134,7 @@ final class BridgeServer {
     private Response processLine(String line) {
         try {
             Activator.traceInbound(line);
-            return dispatcher.dispatch(gson.fromJson(line, Request.class));
+            return dispatcher.apply(gson.fromJson(line, Request.class));
         } catch (JsonParseException e) {
             return new Response.Error("Invalid JSON: " + e.getMessage(), null);
         } catch (Exception e) {

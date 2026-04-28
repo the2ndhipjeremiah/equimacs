@@ -4,9 +4,17 @@ Bundle-Name: Equimacs Debug
 Bundle-SymbolicName: org.equimacs.debug;singleton:=true
 Bundle-Version: 1.0.0.qualifier
 Bundle-ClassPath: .
-Import-Package: org.equimacs.eclipse.bridge.api,
- org.equimacs.protocol,
+Require-Bundle: org.eclipse.ui,
+ org.eclipse.ui.ide,
+ org.eclipse.swt,
+ org.eclipse.core.runtime,
+ org.eclipse.core.resources,
+ org.eclipse.debug.core,
+ org.eclipse.jdt.core,
+ org.eclipse.jdt.debug,
  com.google.gson
+Import-Package: org.equimacs.eclipse.bridge.api,
+ org.equimacs.protocol
 Service-Component: OSGI-INF/DebugCommandHandler.xml
 Bundle-RequiredExecutionEnvironment: JavaSE-26
 Eclipse-BundleShape: dir

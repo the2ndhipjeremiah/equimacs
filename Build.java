@@ -110,7 +110,8 @@ public class Build {
             if (Files.exists(out)) deleteDir(out);
             Files.createDirectories(out);
 
-            String cp = ROOT.resolve("plugins/org.equimacs.eclipse.bridge/build/classes")
+            String cp = findEclipseJars()
+                + File.pathSeparator + ROOT.resolve("plugins/org.equimacs.eclipse.bridge/build/classes")
                 + File.pathSeparator + ROOT.resolve("libs/protocol/build/libs/protocol.jar")
                 + File.pathSeparator + getLib("gson")
                 + File.pathSeparator + getLib("osgi-annotations");
@@ -135,7 +136,6 @@ public class Build {
 
         copyDir(classes, staging);
         explodeJarInto(ROOT.resolve("libs/protocol/build/libs/protocol.jar"), staging);
-        explodeJarInto(ROOT.resolve("lib/gson.jar"), staging);
         Files.copy(bridgeDir.resolve("plugin.xml"), staging.resolve("plugin.xml"), StandardCopyOption.REPLACE_EXISTING);
         copyOsgiInf(bridgeDir, staging);
 
@@ -430,7 +430,7 @@ public class Build {
             "org.eclipse.core.commands_", "org.eclipse.jface_", "org.eclipse.ui.workbench_", "org.eclipse.swt_",
             "org.eclipse.core.jobs_", "org.eclipse.equinox.registry_", "org.eclipse.equinox.preferences_",
             "org.eclipse.core.contenttype_", "org.eclipse.swt.win32.win32.x86_64_",
-            "org.apache.felix.gogo.runtime_", "org.eclipse.ui.ide_" };
+            "org.apache.felix.gogo.runtime_", "org.eclipse.ui.ide_", "com.google.gson_" };
         
         List<String> found = new ArrayList<>();
         try (Stream<Path> stream = Files.list(plugins)) {
