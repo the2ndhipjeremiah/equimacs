@@ -145,8 +145,8 @@ public class EquimacsCLI {
     }
 
     private static String sendRequest(Request request) throws Exception {
-        Path socketPath = Path.of(System.getProperty("user.home"), ".equimacs.sock");
-        
+        Path socketPath = resolveSocketPath();
+
         try (SocketChannel channel = SocketChannel.open(StandardProtocolFamily.UNIX)) {
             channel.connect(UnixDomainSocketAddress.of(socketPath));
             
@@ -161,8 +161,16 @@ public class EquimacsCLI {
         }
     }
 
+    private static Path resolveSocketPath() {
+        String env = System.getenv("EQUIMACS_SOCKET");
+        if (env != null && !env.isBlank()) return Path.of(env);
+        String prop = System.getProperty("equimacs.socket");
+        if (prop != null && !prop.isBlank()) return Path.of(prop);
+        return Path.of(System.getProperty("user.home"), ".equimacs.sock");
+    }
+
     private static void awaitBridgeReady() {
-        Path socketPath = Path.of(System.getProperty("user.home"), ".equimacs.sock");
+        Path socketPath = resolveSocketPath();
         for (int i = 0; i < 20; i++) {
             try {
                 Thread.sleep(500);

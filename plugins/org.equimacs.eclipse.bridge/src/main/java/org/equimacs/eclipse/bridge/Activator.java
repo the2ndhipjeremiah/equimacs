@@ -5,11 +5,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
+import org.eclipse.core.runtime.Plugin;
 import org.eclipse.core.runtime.Status;
-import org.eclipse.ui.plugin.AbstractUIPlugin;
 import org.osgi.framework.BundleContext;
 
-public class Activator extends AbstractUIPlugin {
+public class Activator extends Plugin {
     public static final String PLUGIN_ID = "org.equimacs.eclipse.bridge";
     private static final Path TRACE_LOG = Path.of(System.getProperty("user.home"), ".equimacs.trace");
 

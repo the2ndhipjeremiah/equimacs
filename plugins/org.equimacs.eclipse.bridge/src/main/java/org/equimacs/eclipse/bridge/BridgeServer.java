@@ -39,7 +39,7 @@ public final class BridgeServer {
         }
 
         serverExecutor = Executors.newCachedThreadPool();
-        socketPath = Path.of(System.getProperty("user.home"), ".equimacs.sock");
+        socketPath = resolveSocketPath();
         Activator.logInfo("BridgeServer.start preparing socket at " + socketPath);
         Activator.traceLifecycle("BridgeServer.start user.home=" + System.getProperty("user.home"));
         Activator.traceLifecycle("BridgeServer.start socketPath=" + socketPath);
@@ -83,6 +83,14 @@ public final class BridgeServer {
         if (failure != null) {
             throw failure;
         }
+    }
+
+    public static Path resolveSocketPath() {
+        String env = System.getenv("EQUIMACS_SOCKET");
+        if (env != null && !env.isBlank()) return Path.of(env);
+        String prop = System.getProperty("equimacs.socket");
+        if (prop != null && !prop.isBlank()) return Path.of(prop);
+        return Path.of(System.getProperty("user.home"), ".equimacs.sock");
     }
 
     public boolean isRunning() {

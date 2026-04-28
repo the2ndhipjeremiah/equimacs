@@ -16,6 +16,8 @@ public class Build {
     private static final String BRIDGE_BUNDLE_VERSION = "1.0.0.qualifier";
     private static final String DEBUG_BUNDLE_ID = "org.equimacs.debug";
     private static final String DEBUG_BUNDLE_VERSION = "1.0.0.qualifier";
+    private static final String APP_BUNDLE_ID = "org.equimacs.eclipse.app";
+    private static final String APP_BUNDLE_VERSION = "1.0.0.qualifier";
     private static final Map<String, String> LIBS = new LinkedHashMap<>();
 
     public static void main(String[] args) {
@@ -34,6 +36,7 @@ public class Build {
             buildProtocol();
             buildBridge();
             buildDebug();
+            buildApp();
             buildCLI();
             buildMgr();
             packageAll();
@@ -124,6 +127,45 @@ public class Build {
 
             packageDebugBundle(debugDir, out);
         });
+    }
+
+    private static void buildApp() throws Exception {
+        step("app", () -> {
+            Path appDir = ROOT.resolve("plugins/org.equimacs.eclipse.app");
+            Path src = appDir.resolve("src/main/java");
+            Path out = appDir.resolve("build/classes");
+            if (Files.exists(out)) deleteDir(out);
+            Files.createDirectories(out);
+
+            String cp = findEclipseJars()
+                + File.pathSeparator + ROOT.resolve("plugins/org.equimacs.eclipse.bridge/build/classes");
+
+            List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "26"));
+            try (Stream<Path> s = Files.walk(src)) {
+                s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
+            }
+            runProcess(javacCmd);
+
+            packageAppBundle(appDir, out);
+        });
+    }
+
+    private static void packageAppBundle(Path appDir, Path classes) throws Exception {
+        Path staging = appDir.resolve("build/bundle");
+        Path jarOut = appDir.resolve("build/libs/org.equimacs.eclipse.app.jar");
+
+        deleteDir(staging);
+        Files.createDirectories(staging);
+        Files.createDirectories(jarOut.getParent());
+
+        copyDir(classes, staging);
+        Files.copy(appDir.resolve("plugin.xml"), staging.resolve("plugin.xml"), StandardCopyOption.REPLACE_EXISTING);
+
+        Files.deleteIfExists(jarOut);
+        runProcess(List.of(getJar(), "--create",
+            "--file", jarOut.toString(),
+            "--manifest", appDir.resolve("META-INF/MANIFEST.MF").toString(),
+            "-C", staging.toString(), "."));
     }
 
     private static void packageBridgeBundle(Path bridgeDir, Path classes) throws Exception {
@@ -361,6 +403,8 @@ public class Build {
             ROOT.resolve("plugins/org.equimacs.eclipse.bridge/build/libs/org.equimacs.eclipse.bridge.jar"));
         deployBundle(DEBUG_BUNDLE_ID, DEBUG_BUNDLE_VERSION,
             ROOT.resolve("plugins/org.equimacs.debug/build/libs/org.equimacs.debug.jar"));
+        deployBundle(APP_BUNDLE_ID, APP_BUNDLE_VERSION,
+            ROOT.resolve("plugins/org.equimacs.eclipse.app/build/libs/org.equimacs.eclipse.app.jar"));
     }
 
     private static void deployBundle(String bundleId, String version, Path jar) throws IOException {
@@ -430,7 +474,8 @@ public class Build {
             "org.eclipse.core.commands_", "org.eclipse.jface_", "org.eclipse.ui.workbench_", "org.eclipse.swt_",
             "org.eclipse.core.jobs_", "org.eclipse.equinox.registry_", "org.eclipse.equinox.preferences_",
             "org.eclipse.core.contenttype_", "org.eclipse.swt.win32.win32.x86_64_",
-            "org.apache.felix.gogo.runtime_", "org.eclipse.ui.ide_", "com.google.gson_" };
+            "org.apache.felix.gogo.runtime_", "org.eclipse.ui.ide_", "com.google.gson_",
+            "org.eclipse.equinox.app_" };
         
         List<String> found = new ArrayList<>();
         try (Stream<Path> stream = Files.list(plugins)) {

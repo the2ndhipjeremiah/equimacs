@@ -4,8 +4,9 @@
 
 Equimacs is a local bridge between Eclipse and external tools. It consists of:
 
-- an Eclipse plugin that listens on `~/.equimacs.sock`
-- `eqm-cli`, a CLI for sending bridge requests
+- an Eclipse plugin that listens on `~/.equimacs.sock` (default)
+- `eqmd`, a headless launcher that runs the bridge inside Eclipse with no GUI (defaults to `~/.equimacs-headless/equimacs.sock`, can run alongside the IDE)
+- `eqm-cli`, a CLI for sending bridge requests (set `EQUIMACS_SOCKET` to target a non-default daemon)
 - `eqm-mgr`, a CLI for local build, packaging, deploy, and repo maintenance tasks
 
 The current implementation is centered on Java debugging and Eclipse workspace automation. CDT support is not implemented yet.

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -z "${ECLIPSE_HOME:-}" ]]; then
+    echo "[eqmd] ECLIPSE_HOME is not set" >&2
+    exit 1
+fi
+
+EQUIMACS_HOME="${EQUIMACS_HOME:-$HOME/.equimacs-headless}"
+WORKSPACE="${EQUIMACS_WORKSPACE:-$EQUIMACS_HOME/workspace}"
+export EQUIMACS_SOCKET="${EQUIMACS_SOCKET:-$EQUIMACS_HOME/equimacs.sock}"
+
+mkdir -p "$EQUIMACS_HOME"
+
+if [[ -x "$ECLIPSE_HOME/eclipsec.exe" ]]; then
+    LAUNCHER="$ECLIPSE_HOME/eclipsec.exe"
+elif [[ -x "$ECLIPSE_HOME/eclipse" ]]; then
+    LAUNCHER="$ECLIPSE_HOME/eclipse"
+else
+    echo "[eqmd] no eclipse launcher found in $ECLIPSE_HOME" >&2
+    exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EQMD_INI="$SCRIPT_DIR/eqmd.ini"
+
+exec "$LAUNCHER" \
+    --launcher.ini "$EQMD_INI" \
+    -nosplash -consoleLog \
+    -application org.equimacs.eclipse.app.application \
+    -data "$WORKSPACE" \
+    "$@"

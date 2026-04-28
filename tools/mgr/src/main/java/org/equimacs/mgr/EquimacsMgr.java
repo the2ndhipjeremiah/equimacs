@@ -224,7 +224,9 @@ public class EquimacsMgr {
         data.put("paths", paths);
 
         Map<String, Object> runtime = new LinkedHashMap<>();
-        runtime.put("socketExists", Files.exists(eclipseUserHome.resolve(".equimacs.sock")));
+        Path socketPath = resolveSocketPath(eclipseUserHome);
+        runtime.put("socketPath", socketPath.toString());
+        runtime.put("socketExists", Files.exists(socketPath));
         runtime.put("eclipseProcesses", eclipseProcesses());
         data.put("runtime", runtime);
 
@@ -260,6 +262,14 @@ public class EquimacsMgr {
             return Path.of(ECLIPSE_HOME);
         }
         return Path.of(System.getProperty("user.home"), "eclipse");
+    }
+
+    private static Path resolveSocketPath(Path eclipseUserHome) {
+        String env = System.getenv("EQUIMACS_SOCKET");
+        if (env != null && !env.isBlank()) return Path.of(env);
+        String prop = System.getProperty("equimacs.socket");
+        if (prop != null && !prop.isBlank()) return Path.of(prop);
+        return eclipseUserHome.resolve(".equimacs.sock");
     }
 
     private static Path getEclipseUserHome(Path eclipseHome) {
