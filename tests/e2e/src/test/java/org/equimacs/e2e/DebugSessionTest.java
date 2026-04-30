@@ -66,6 +66,41 @@ class DebugSessionTest {
         assertTrue(hasVariable(variables, "next", "42"), varsResponse::toString);
     }
 
+    @Test
+    void stepOverAdvancesLine() throws Exception {
+        JsonObject hit = launchToBreakpoint(3);
+        assertEquals(3, hit.get("line").getAsInt(), hit::toString);
+
+        JsonObject step = harness.rpc().request(new Request.Step(Request.StepType.OVER));
+        assertTrue(step.has("result"), step::toString);
+        assertEquals("Step executed", step.get("result").getAsString());
+
+        JsonObject event = waitForEvent("StepCompleted");
+        assertEquals("Hello.java", event.get("file").getAsString(), event::toString);
+        assertEquals("Hello", event.get("class").getAsString(), event::toString);
+        assertEquals(4, event.get("line").getAsInt(), event::toString);
+    }
+
+    @Test
+    void terminateClearsSession() throws Exception {
+        launchToBreakpoint(4);
+
+        JsonObject sessionsBefore = harness.rpc().request(new Request.ListSessions());
+        assertTrue(sessionsBefore.has("result"), sessionsBefore::toString);
+        assertTrue(sessionsBefore.getAsJsonArray("result").size() > 0, sessionsBefore::toString);
+
+        JsonObject terminate = harness.rpc().request(new Request.Terminate());
+        assertTrue(terminate.has("result"), terminate::toString);
+        assertEquals("Terminated 1 session(s)", terminate.get("result").getAsString());
+
+        JsonObject terminated = waitForEvent("Terminated");
+        assertEquals("Terminated", terminated.get("event").getAsString(), terminated::toString);
+
+        JsonObject sessionsAfter = harness.rpc().request(new Request.ListSessions());
+        assertTrue(sessionsAfter.has("result"), sessionsAfter::toString);
+        assertEquals(0, sessionsAfter.getAsJsonArray("result").size(), sessionsAfter::toString);
+    }
+
     private static JsonObject launchToBreakpoint(int line) throws Exception {
         JsonObject launches = harness.rpc().request(new Request.ListLaunches());
         assertTrue(launches.has("result"), launches::toString);
@@ -82,6 +117,10 @@ class DebugSessionTest {
     }
 
     private static JsonObject waitForBreakpointHit() throws Exception {
+        return waitForEvent("BreakpointHit");
+    }
+
+    private static JsonObject waitForEvent(String eventName) throws Exception {
         long deadline = System.nanoTime() + 30_000_000_000L;
         JsonObject lastEvent = null;
         while (System.nanoTime() < deadline) {
@@ -89,11 +128,11 @@ class DebugSessionTest {
             assertTrue(eventResponse.has("result"), eventResponse::toString);
             JsonObject event = eventResponse.getAsJsonObject("result");
             lastEvent = event;
-            if (event.get("event").getAsString().equals("BreakpointHit")) {
+            if (event.get("event").getAsString().equals(eventName)) {
                 return event;
             }
         }
-        throw new AssertionError("Timed out waiting for BreakpointHit. Last event: " + lastEvent);
+        throw new AssertionError("Timed out waiting for " + eventName + ". Last event: " + lastEvent);
     }
 
     private static void drainEvents() throws Exception {

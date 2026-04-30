@@ -16,7 +16,7 @@ public sealed interface Request {
     // --- Execution Control ---
     record Resume() implements Request {}
     record Suspend() implements Request {}
-    record Step(StepType type) implements Request {}
+    record Step(StepType stepType) implements Request {}
 
     // --- Shell ---
     record GogoExec(String command) implements Request {}

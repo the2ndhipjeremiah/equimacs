@@ -33,9 +33,9 @@ class CliParserTest {
     void parsesExecutionCommands() {
         assertInstanceOf(Request.Resume.class, parse("resume"));
         assertInstanceOf(Request.Suspend.class, parse("suspend"));
-        assertEquals(Request.StepType.OVER, assertInstanceOf(Request.Step.class, parse("step")).type());
-        assertEquals(Request.StepType.INTO, assertInstanceOf(Request.Step.class, parse("step", "INTO")).type());
-        assertEquals(Request.StepType.RETURN, assertInstanceOf(Request.Step.class, parse("step", "return")).type());
+        assertEquals(Request.StepType.OVER, assertInstanceOf(Request.Step.class, parse("step")).stepType());
+        assertEquals(Request.StepType.INTO, assertInstanceOf(Request.Step.class, parse("step", "INTO")).stepType());
+        assertEquals(Request.StepType.RETURN, assertInstanceOf(Request.Step.class, parse("step", "return")).stepType());
     }
 
     @Test

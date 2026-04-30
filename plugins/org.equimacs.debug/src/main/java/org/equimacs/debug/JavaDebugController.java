@@ -1,24 +1,34 @@
 package org.equimacs.debug;
 
 import com.google.gson.JsonObject;
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IncrementalProjectBuilder;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.IConfigurationElement;
+import org.eclipse.core.runtime.IExtensionRegistry;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Platform;
 import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.ui.IMarkerResolution;
+import org.eclipse.ui.IMarkerResolutionGenerator;
+import org.eclipse.ui.IMarkerResolutionGenerator2;
+import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.ide.IDE;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.Path;
@@ -267,7 +277,7 @@ public class JavaDebugController {
         List<Map<String, Object>> result = new ArrayList<>();
         int globalIndex = 0;
         for (IMarker marker : findMarkersAtLine(filePath, line)) {
-            IMarkerResolution[] resolutions = IDE.getMarkerHelpRegistry().getResolutions(marker);
+            IMarkerResolution[] resolutions = getMarkerResolutions(marker);
             for (IMarkerResolution res : resolutions) {
                 Map<String, Object> info = new HashMap<>();
                 info.put("index", globalIndex++);
@@ -282,19 +292,157 @@ public class JavaDebugController {
     public String applyFix(String filePath, int line, int fixIndex) throws CoreException {
         int globalIndex = 0;
         for (IMarker marker : findMarkersAtLine(filePath, line)) {
-            IMarkerResolution[] resolutions = IDE.getMarkerHelpRegistry().getResolutions(marker);
+            IMarkerResolution[] resolutions = getMarkerResolutions(marker);
             for (IMarkerResolution res : resolutions) {
                 if (globalIndex++ == fixIndex) {
                     String label = res.getLabel();
                     IMarker targetMarker = marker;
                     Display display = Display.getDefault();
-                    if (display == null) throw error("No SWT Display available");
-                    display.syncExec(() -> res.run(targetMarker));
+                    if (display == null) {
+                        res.run(targetMarker);
+                    } else {
+                        display.syncExec(() -> res.run(targetMarker));
+                    }
                     return "Applied fix [" + fixIndex + "]: " + label;
                 }
             }
         }
         throw error("No fix at index " + fixIndex + " — call quickfixes first");
+    }
+
+    private IMarkerResolution[] getMarkerResolutions(IMarker marker) throws CoreException {
+        try {
+            if (!PlatformUI.isWorkbenchRunning()) {
+                return getHeadlessMarkerResolutions(marker);
+            }
+        } catch (RuntimeException e) {
+            return getHeadlessMarkerResolutions(marker);
+        }
+
+        try {
+            return IDE.getMarkerHelpRegistry().getResolutions(marker);
+        } catch (RuntimeException e) {
+            List<IMarkerResolution> result = new ArrayList<>();
+            for (IMarkerResolution resolution : getMarkerResolutionsFromExtensions(marker)) {
+                result.add(resolution);
+            }
+            for (IMarkerResolution resolution : getHeadlessMarkerResolutions(marker)) {
+                result.add(resolution);
+            }
+            return result.toArray(IMarkerResolution[]::new);
+        }
+    }
+
+    private IMarkerResolution[] getMarkerResolutionsFromExtensions(IMarker marker) throws CoreException {
+        List<IMarkerResolution> result = new ArrayList<>();
+        IExtensionRegistry registry = Platform.getExtensionRegistry();
+        if (registry == null) return new IMarkerResolution[0];
+
+        IConfigurationElement[] elements = registry.getConfigurationElementsFor("org.eclipse.ui.ide.markerResolution");
+        for (IConfigurationElement element : elements) {
+            if (!element.getName().equals("markerResolutionGenerator")) continue;
+
+            String markerType = element.getAttribute("markerType");
+            if (markerType == null || !marker.isSubtypeOf(markerType)) continue;
+
+            try {
+                Object executable = element.createExecutableExtension("class");
+                if (executable instanceof IMarkerResolutionGenerator2 generator2
+                    && !generator2.hasResolutions(marker)) {
+                    continue;
+                }
+                if (executable instanceof IMarkerResolutionGenerator generator) {
+                    for (IMarkerResolution resolution : generator.getResolutions(marker)) {
+                        result.add(resolution);
+                    }
+                }
+            } catch (CoreException | RuntimeException e) {
+                // Some UI-contributed resolvers still require a workbench in headless eqmd.
+            }
+        }
+        return result.toArray(IMarkerResolution[]::new);
+    }
+
+    private IMarkerResolution[] getHeadlessMarkerResolutions(IMarker marker) throws CoreException {
+        String message = marker.getAttribute(IMarker.MESSAGE, "");
+        List<IMarkerResolution> result = new ArrayList<>();
+        addJavaUtilImportResolution(marker, message, result, "List");
+        addJavaUtilImportResolution(marker, message, result, "ArrayList");
+        addJavaUtilImportResolution(marker, message, result, "Map");
+        addJavaUtilImportResolution(marker, message, result, "HashMap");
+        addJavaUtilImportResolution(marker, message, result, "Set");
+        addJavaUtilImportResolution(marker, message, result, "HashSet");
+        return result.toArray(IMarkerResolution[]::new);
+    }
+
+    private void addJavaUtilImportResolution(
+        IMarker marker,
+        String message,
+        List<IMarkerResolution> result,
+        String simpleName
+    ) {
+        String importName = "java.util." + simpleName;
+        if (!message.contains(simpleName + " cannot be resolved to a type")) return;
+        if (!(marker.getResource() instanceof IFile file)) return;
+        try {
+            String source = readFile(file);
+            if (!source.contains(simpleName) || source.contains("import " + importName + ";")) return;
+            result.add(new ImportResolution(importName));
+        } catch (CoreException e) {
+            // Ignore broken fallback candidates; marker listing should still succeed.
+        }
+    }
+
+    private String readFile(IFile file) throws CoreException {
+        try (InputStream in = file.getContents()) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            throw error("Could not read " + file.getFullPath() + ": " + e.getMessage());
+        }
+    }
+
+    private final class ImportResolution implements IMarkerResolution {
+        private final String importName;
+
+        private ImportResolution(String importName) {
+            this.importName = importName;
+        }
+
+        @Override
+        public String getLabel() {
+            int lastDot = importName.lastIndexOf('.');
+            String simpleName = importName.substring(lastDot + 1);
+            return "Import '" + simpleName + "' (" + importName + ")";
+        }
+
+        @Override
+        public void run(IMarker marker) {
+            try {
+                if (!(marker.getResource() instanceof IFile file)) return;
+                String source = readFile(file);
+                if (source.contains("import " + importName + ";")) return;
+
+                String updated = insertImport(source, importName);
+                byte[] bytes = updated.getBytes(StandardCharsets.UTF_8);
+                file.setContents(new ByteArrayInputStream(bytes), true, true, NULL_MONITOR);
+            } catch (CoreException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    private String insertImport(String source, String importName) {
+        String importLine = "import " + importName + ";" + System.lineSeparator();
+        if (source.startsWith("package ")) {
+            int packageEnd = source.indexOf(';');
+            if (packageEnd >= 0) {
+                int insertAt = packageEnd + 1;
+                String lineBreak = source.startsWith("\r\n", insertAt) ? "\r\n" : "\n";
+                if (source.startsWith(lineBreak, insertAt)) insertAt += lineBreak.length();
+                return source.substring(0, insertAt) + importLine + source.substring(insertAt);
+            }
+        }
+        return importLine + source;
     }
 
     private IMarker[] findMarkersAtLine(String filePath, int line) throws CoreException {
@@ -409,10 +557,11 @@ public class JavaDebugController {
     public List<Map<String, Object>> listSessions() throws CoreException {
         List<Map<String, Object>> result = new ArrayList<>();
         for (ILaunch launch : DebugPlugin.getDefault().getLaunchManager().getLaunches()) {
+            if (launch.isTerminated()) continue;
             Map<String, Object> info = new HashMap<>();
             info.put("name", launch.getLaunchConfiguration() != null
                 ? launch.getLaunchConfiguration().getName() : "unknown");
-            info.put("terminated", launch.isTerminated());
+            info.put("terminated", false);
             IDebugTarget target = launch.getDebugTarget();
             info.put("threads", target != null && !target.isTerminated()
                 ? target.getThreads().length : 0);

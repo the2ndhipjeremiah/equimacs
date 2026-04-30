@@ -53,7 +53,7 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
                 yield "Suspended";
             }
             case Request.Step s -> {
-                switch (s.type()) {
+                switch (s.stepType()) {
                     case OVER -> c.stepOver();
                     case INTO -> c.stepInto();
                     case RETURN -> c.stepReturn();

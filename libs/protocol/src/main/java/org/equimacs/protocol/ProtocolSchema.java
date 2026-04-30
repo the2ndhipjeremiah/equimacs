@@ -43,7 +43,7 @@ public class ProtocolSchema {
           "description": "Step execution of the first suspended thread",
           "record": "Step",
           "params": {
-            "type": { "type": "string", "enum": ["OVER", "INTO", "RETURN"], "default": "OVER" }
+            "stepType": { "type": "string", "enum": ["OVER", "INTO", "RETURN"], "default": "OVER" }
           }
         },
         "reload": {
