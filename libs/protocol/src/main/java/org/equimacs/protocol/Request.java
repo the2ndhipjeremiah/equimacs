@@ -46,6 +46,9 @@ public sealed interface Request {
     record ListSessions() implements Request {}
     record Terminate() implements Request {}
 
+    // --- Headless Daemon ---
+    record Shutdown() implements Request {}
+
     /**
      * Types of stepping available.
      */

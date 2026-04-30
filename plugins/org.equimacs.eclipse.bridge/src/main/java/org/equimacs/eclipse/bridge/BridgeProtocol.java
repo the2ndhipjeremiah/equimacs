@@ -48,6 +48,7 @@ final class BridgeProtocol {
             case "ListLaunches" -> Request.ListLaunches.class;
             case "ListSessions" -> Request.ListSessions.class;
             case "Terminate" -> Request.Terminate.class;
+            case "Shutdown" -> Request.Shutdown.class;
             default -> throw new JsonParseException("Unknown request type: " + type);
         };
     }

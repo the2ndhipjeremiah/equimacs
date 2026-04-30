@@ -35,27 +35,27 @@ public class EquimacsCLI {
             return;
         }
 
-        Request request = parseCommand(cli);
-        if (request == null) return;
-
         try {
+            Request request = parseCommand(cli);
             System.out.println(sendRequest(request));
             if (request instanceof Request.Reload) awaitBridgeReady();
+        } catch (CliParseException e) {
+            exitWithError(e.getMessage());
         } catch (Exception e) {
             exitWithError(e.getMessage());
         }
     }
 
-    private static Request parseCommand(CliArgs cli) {
+    public static Request parseCommand(CliArgs cli) {
         List<String> args = cli.positional();
         String cmd = args.get(0).toLowerCase();
         try {
             return switch (cmd) {
                 case "bp" -> {
-                    if (args.size() < 2) exitWithError("Usage: bp <file>:<line>");
+                    if (args.size() < 2) throw new CliParseException("Usage: bp <file>:<line>");
                     String spec = args.get(1);
                     int lastColon = spec.lastIndexOf(':');
-                    if (lastColon <= 0) exitWithError("Usage: bp <file>:<line> (missing line number)");
+                    if (lastColon <= 0) throw new CliParseException("Usage: bp <file>:<line> (missing line number)");
                     yield new Request.SetBreakpoint(
                         spec.substring(0, lastColon),
                         Integer.parseInt(spec.substring(lastColon + 1)),
@@ -71,7 +71,7 @@ public class EquimacsCLI {
                     yield new Request.Step(type);
                 }
                 case "gogo" -> {
-                    if (args.size() < 2) exitWithError("Usage: gogo <command...>");
+                    if (args.size() < 2) throw new CliParseException("Usage: gogo <command...>");
                     yield new Request.GogoExec(String.join(" ", args.subList(1, args.size())));
                 }
                 case "reload" -> new Request.Reload();
@@ -83,31 +83,31 @@ public class EquimacsCLI {
                     args.size() > 1 ? args.get(1) : null,
                     cli.getOption("kind", "k"));
                 case "classpath" -> {
-                    if (args.size() < 2) exitWithError("Usage: classpath <project>");
+                    if (args.size() < 2) throw new CliParseException("Usage: classpath <project>");
                     yield new Request.GetClasspath(args.get(1));
                 }
                 case "describe" -> {
-                    if (args.size() < 2) exitWithError("Usage: describe <project>");
+                    if (args.size() < 2) throw new CliParseException("Usage: describe <project>");
                     yield new Request.GetProjectDescription(args.get(1));
                 }
                 case "refresh" -> {
-                    if (args.size() < 2) exitWithError("Usage: refresh <project>");
+                    if (args.size() < 2) throw new CliParseException("Usage: refresh <project>");
                     yield new Request.RefreshProject(args.get(1));
                 }
                 case "quickfixes" -> {
-                    if (args.size() < 2) exitWithError("Usage: quickfixes <file>:<line>");
+                    if (args.size() < 2) throw new CliParseException("Usage: quickfixes <file>:<line>");
                     String spec = args.get(1);
                     int lastColon = spec.lastIndexOf(':');
-                    if (lastColon <= 0) exitWithError("Usage: quickfixes <file>:<line>");
+                    if (lastColon <= 0) throw new CliParseException("Usage: quickfixes <file>:<line>");
                     yield new Request.GetQuickFixes(
                         spec.substring(0, lastColon),
                         Integer.parseInt(spec.substring(lastColon + 1)));
                 }
                 case "applyfix" -> {
-                    if (args.size() < 3) exitWithError("Usage: applyfix <file>:<line> <index>");
+                    if (args.size() < 3) throw new CliParseException("Usage: applyfix <file>:<line> <index>");
                     String spec = args.get(1);
                     int lastColon = spec.lastIndexOf(':');
-                    if (lastColon <= 0) exitWithError("Usage: applyfix <file>:<line> <index>");
+                    if (lastColon <= 0) throw new CliParseException("Usage: applyfix <file>:<line> <index>");
                     yield new Request.ApplyFix(
                         spec.substring(0, lastColon),
                         Integer.parseInt(spec.substring(lastColon + 1)),
@@ -115,11 +115,11 @@ public class EquimacsCLI {
                 }
                 case "threads" -> new Request.GetThreads();
                 case "stack" -> {
-                    if (args.size() < 2) exitWithError("Usage: stack <threadId>");
+                    if (args.size() < 2) throw new CliParseException("Usage: stack <threadId>");
                     yield new Request.GetStack(Long.parseLong(args.get(1)));
                 }
                 case "vars" -> {
-                    if (args.size() < 2) exitWithError("Usage: vars <frameId>");
+                    if (args.size() < 2) throw new CliParseException("Usage: vars <frameId>");
                     yield new Request.GetVariables(Long.parseLong(args.get(1)));
                 }
                 case "wait-event" -> {
@@ -127,26 +127,29 @@ public class EquimacsCLI {
                     yield new Request.WaitEvent(t != null ? Integer.parseInt(t) : 30_000);
                 }
                 case "launch" -> {
-                    if (args.size() < 2) exitWithError("Usage: launch <config-name>");
+                    if (args.size() < 2) throw new CliParseException("Usage: launch <config-name>");
                     yield new Request.Launch(args.get(1));
                 }
                 case "list-launches" -> new Request.ListLaunches();
                 case "sessions" -> new Request.ListSessions();
                 case "terminate" -> new Request.Terminate();
+                case "shutdown" -> new Request.Shutdown();
                 default -> {
-                    exitWithError("Unknown command: " + cmd);
-                    yield null;
+                    throw new CliParseException("Unknown command: " + cmd);
                 }
             };
-        } catch (Exception e) {
-            exitWithError("Parsing error: " + e.getMessage());
-            return null;
+        } catch (CliParseException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new CliParseException("Parsing error: " + e.getMessage(), e);
         }
     }
 
-    private static String sendRequest(Request request) throws Exception {
-        Path socketPath = resolveSocketPath();
+    public static String sendRequest(Request request) throws Exception {
+        return sendRequest(request, resolveSocketPath());
+    }
 
+    public static String sendRequest(Request request, Path socketPath) throws Exception {
         try (SocketChannel channel = SocketChannel.open(StandardProtocolFamily.UNIX)) {
             channel.connect(UnixDomainSocketAddress.of(socketPath));
             

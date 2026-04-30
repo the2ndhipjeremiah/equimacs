@@ -19,6 +19,8 @@ public class Build {
     private static final String APP_BUNDLE_ID = "org.equimacs.eclipse.app";
     private static final String APP_BUNDLE_VERSION = "1.0.0.qualifier";
     private static final Map<String, String> LIBS = new LinkedHashMap<>();
+    private static boolean RUN_TESTS;
+    private static boolean RUN_E2E;
 
     public static void main(String[] args) {
         try {
@@ -34,6 +36,13 @@ public class Build {
             
             buildCliLib();
             buildProtocol();
+            if (RUN_TESTS) {
+                buildCLI();
+                buildCliTests();
+                runCliTests();
+                System.out.println(">>> Tests Successful");
+                return;
+            }
             buildBridge();
             buildDebug();
             buildApp();
@@ -42,6 +51,11 @@ public class Build {
             packageAll();
 
             copyToDropins();
+            if (RUN_E2E) {
+                buildE2eTests();
+                runE2eTests();
+                System.out.println(">>> E2E Tests Successful");
+            }
             
             System.out.println(">>> Build Successful");
         } catch (Throwable t) {
@@ -138,7 +152,8 @@ public class Build {
             Files.createDirectories(out);
 
             String cp = findEclipseJars()
-                + File.pathSeparator + ROOT.resolve("plugins/org.equimacs.eclipse.bridge/build/classes");
+                + File.pathSeparator + ROOT.resolve("plugins/org.equimacs.eclipse.bridge/build/classes")
+                + File.pathSeparator + ROOT.resolve("libs/protocol/build/libs/protocol.jar");
 
             List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "26"));
             try (Stream<Path> s = Files.walk(src)) {
@@ -252,8 +267,86 @@ public class Build {
             String cp = ROOT.resolve("libs/protocol/build/libs/protocol.jar") + 
                         File.pathSeparator + ROOT.resolve("libs/cli/build/classes") + 
                         File.pathSeparator + getLib("gson");
-            runProcess(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "26",
-                src.resolve("org/equimacs/cli/EquimacsCLI.java").toString()));
+
+            List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "26"));
+            try (Stream<Path> s = Files.walk(src)) {
+                s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
+            }
+            runProcess(javacCmd);
+        });
+    }
+
+    private static void buildCliTests() throws Exception {
+        step("cli-tests", () -> {
+            Path src = ROOT.resolve("tools/cli/src/test/java");
+            Path out = ROOT.resolve("tools/cli/build/test-classes");
+            if (Files.exists(out)) deleteDir(out);
+            Files.createDirectories(out);
+
+            String cp = ROOT.resolve("tools/cli/build/classes")
+                + File.pathSeparator + ROOT.resolve("libs/protocol/build/libs/protocol.jar")
+                + File.pathSeparator + ROOT.resolve("libs/cli/build/classes")
+                + File.pathSeparator + getLib("gson")
+                + File.pathSeparator + getLib("junit-platform-console-standalone");
+
+            List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "26"));
+            try (Stream<Path> s = Files.walk(src)) {
+                s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
+            }
+            runProcess(javacCmd);
+        });
+    }
+
+    private static void runCliTests() throws Exception {
+        step("test", () -> {
+            String cp = ROOT.resolve("tools/cli/build/classes")
+                + File.pathSeparator + ROOT.resolve("tools/cli/build/test-classes")
+                + File.pathSeparator + ROOT.resolve("libs/protocol/build/libs/protocol.jar")
+                + File.pathSeparator + ROOT.resolve("libs/cli/build/classes")
+                + File.pathSeparator + getLib("gson");
+
+            runProcess(List.of(getJava(),
+                "-jar", getLib("junit-platform-console-standalone"),
+                "execute",
+                "--class-path", cp,
+                "--scan-class-path"));
+        });
+    }
+
+    private static void buildE2eTests() throws Exception {
+        step("e2e-tests", () -> {
+            Path src = ROOT.resolve("tests/e2e/src/test/java");
+            Path out = ROOT.resolve("tests/e2e/build/test-classes");
+            if (Files.exists(out)) deleteDir(out);
+            Files.createDirectories(out);
+
+            String cp = ROOT.resolve("tools/cli/build/classes")
+                + File.pathSeparator + ROOT.resolve("libs/protocol/build/libs/protocol.jar")
+                + File.pathSeparator + ROOT.resolve("libs/cli/build/classes")
+                + File.pathSeparator + getLib("gson")
+                + File.pathSeparator + getLib("junit-platform-console-standalone");
+
+            List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "26"));
+            try (Stream<Path> s = Files.walk(src)) {
+                s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
+            }
+            runProcess(javacCmd);
+        });
+    }
+
+    private static void runE2eTests() throws Exception {
+        step("e2e", () -> {
+            String cp = ROOT.resolve("tools/cli/build/classes")
+                + File.pathSeparator + ROOT.resolve("tests/e2e/build/test-classes")
+                + File.pathSeparator + ROOT.resolve("libs/protocol/build/classes")
+                + File.pathSeparator + ROOT.resolve("libs/cli/build/classes")
+                + File.pathSeparator + getLib("gson");
+
+            runProcess(List.of(getJava(),
+                "-jar", getLib("junit-platform-console-standalone"),
+                "execute",
+                "--class-path", cp,
+                "--scan-class-path"));
         });
     }
 
@@ -531,9 +624,12 @@ public class Build {
         for (int i = 0; i < args.length; i++) {
             if (args[i].equals("--eclipse") && i + 1 < args.length) ECLIPSE_HOME = args[++i];
             if (args[i].equals("--java") && i + 1 < args.length) JAVA_HOME = args[++i];
+            if (args[i].equals("--test")) RUN_TESTS = true;
+            if (args[i].equals("--e2e")) RUN_E2E = true;
         }
     }
 
+    private static String getJava() { return JAVA_HOME != null ? Path.of(JAVA_HOME, "bin/java").toString() : "java"; }
     private static String getJavac() { return JAVA_HOME != null ? Path.of(JAVA_HOME, "bin/javac").toString() : "javac"; }
     private static String getJar() { return JAVA_HOME != null ? Path.of(JAVA_HOME, "bin/jar").toString() : "jar"; }
 

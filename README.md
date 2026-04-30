@@ -40,8 +40,13 @@ eqm-cli applyfix <file>:<line> <index>
 eqm-cli wait-event [--timeout <ms>]
 eqm-cli launch <config-name>
 eqm-cli list-launches
+eqm-cli shutdown
 eqm-cli --schema
 ```
+
+`shutdown` is only handled by the headless daemon. In the IDE bridge it should
+fail with no registered handler, so the CLI cannot accidentally close the GUI
+Eclipse process.
 
 ## `eqm-mgr`
 
@@ -69,7 +74,7 @@ This repo uses [Build.java](/C:/Users/the2nd/equimacs/Build.java) rather than Gr
 
 Environment is read from `.env`:
 
-- `JAVA_HOME`: JDK 25
+- `JAVA_HOME`: JDK 26
 - `ECLIPSE_HOME`: Eclipse installation root
 
 Typical local build:
@@ -78,10 +83,77 @@ Typical local build:
 java Build.java
 ```
 
-Packaged wrappers live in [bin/eqm-cli](/C:/Users/the2nd/equimacs/bin/eqm-cli) and [bin/eqm-mgr](/C:/Users/the2nd/equimacs/bin/eqm-mgr).
+This compiles the protocol, bridge/debug/app bundles, CLI tools, packages
+`eqm-cli` and `eqm-mgr`, and deploys the bundles into the configured Eclipse
+installation.
+
+Packaged app images are written under:
+
+```text
+tools/cli/build/app/eqm-cli/
+tools/mgr/build/app/eqm-mgr/
+```
+
+## Tests
+
+Parser/unit tests:
+
+```powershell
+java Build.java --test
+```
+
+This builds only the CLI library, protocol, CLI, and parser tests. It does not
+start Eclipse and should stay fast.
+
+Headless end-to-end tests:
+
+```powershell
+java Build.java --e2e
+```
+
+This performs a full build/deploy, starts `eqmd` with an isolated workspace and
+socket under `tests/e2e/workspaces/`, drives the bridge through typed protocol
+requests, then shuts the daemon down through the headless-only `shutdown`
+command.
+
+Maintenance rules:
+
+- Add or update a parser test in `tools/cli/src/test/java/` whenever CLI argv
+  parsing changes.
+- Add or update an E2E test in `tests/e2e/src/test/java/` whenever bridge
+  behavior changes.
+- E2E tests should call `EquimacsCLI.sendRequest(Request, Path)` through
+  `EqmdRpc`; do not shell out to `eqm-cli.exe` for normal bridge behavior.
+- Keep daemon workspaces isolated. Use `EqmdHarness` instead of the default
+  `~/.equimacs.sock` or `~/.equimacs-headless/` paths.
+- Generated E2E workspaces are temporary and should not be committed.
 
 ## Eclipse
 
 After building and deploying the plugin into `dropins/`, the bridge starts automatically when Eclipse loads the bundle.
 
 Use `Equimacs Bridge > Start Listening` only if you have stopped it and want to bring the socket back manually.
+
+## Headless Daemon
+
+Run the bridge without opening the Eclipse UI:
+
+```powershell
+tools\eqmd\eqmd.cmd
+```
+
+By default the daemon uses:
+
+```text
+%USERPROFILE%\.equimacs-headless\workspace
+%USERPROFILE%\.equimacs-headless\equimacs.sock
+```
+
+Override with `EQUIMACS_HOME`, `EQUIMACS_WORKSPACE`, and `EQUIMACS_SOCKET`.
+Point the CLI at a daemon socket with:
+
+```powershell
+$env:EQUIMACS_SOCKET="$env:USERPROFILE\.equimacs-headless\equimacs.sock"
+eqm-cli bps
+eqm-cli shutdown
+```
