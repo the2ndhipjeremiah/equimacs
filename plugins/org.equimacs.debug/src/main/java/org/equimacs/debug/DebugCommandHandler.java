@@ -71,6 +71,10 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
             case Request.GetClasspath cp -> c.getClasspath(cp.project());
             case Request.GetProjectDescription d -> c.getProjectDescription(d.project());
             case Request.RefreshProject r -> c.refreshProject(r.project());
+            case Request.PrepareRenameSymbol r -> c.prepareRenameSymbol(r.file(), r.offset(), r.newName());
+            case Request.ApplyPreparedRefactoring r -> c.applyPreparedRefactoring(r.refactoringId());
+            case Request.AbortPreparedRefactoring r -> c.abortPreparedRefactoring(r.refactoringId());
+            case Request.GetPreparedRefactoring r -> c.getPreparedRefactoring(r.refactoringId());
             case Request.Launch l -> c.launch(l.configName());
             case Request.ListLaunches _ -> c.listLaunches();
             case Request.ListSessions _ -> c.listSessions();

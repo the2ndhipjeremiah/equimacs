@@ -568,7 +568,8 @@ public class Build {
             "org.eclipse.core.jobs_", "org.eclipse.equinox.registry_", "org.eclipse.equinox.preferences_",
             "org.eclipse.core.contenttype_", "org.eclipse.swt.win32.win32.x86_64_",
             "org.apache.felix.gogo.runtime_", "org.eclipse.ui.ide_", "com.google.gson_",
-            "org.eclipse.equinox.app_" };
+            "org.eclipse.equinox.app_", "org.eclipse.jdt.core.manipulation_",
+            "org.eclipse.ltk.core.refactoring_", "org.eclipse.text_", "org.eclipse.jface.text_" };
         
         List<String> found = new ArrayList<>();
         try (Stream<Path> stream = Files.list(plugins)) {

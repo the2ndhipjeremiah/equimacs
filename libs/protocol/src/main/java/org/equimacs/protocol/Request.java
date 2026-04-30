@@ -37,6 +37,12 @@ public sealed interface Request {
     record GetProjectDescription(String project) implements Request {}
     record RefreshProject(String project) implements Request {}
 
+    // --- Refactoring ---
+    record PrepareRenameSymbol(String file, int offset, String newName) implements Request {}
+    record ApplyPreparedRefactoring(String refactoringId) implements Request {}
+    record AbortPreparedRefactoring(String refactoringId) implements Request {}
+    record GetPreparedRefactoring(String refactoringId) implements Request {}
+
     // --- Event Streaming ---
     record WaitEvent(int timeoutMs) implements Request {}
 

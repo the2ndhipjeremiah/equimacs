@@ -76,6 +76,37 @@ public class ProtocolSchema {
           "params": {
             "frameId": { "type": "long", "description": "Unique ID of the stack frame" }
           }
+        },
+        "refactor-prepare": {
+          "description": "Prepare a Java refactoring preview without applying edits",
+          "record": "PrepareRenameSymbol",
+          "params": {
+            "kind": { "type": "string", "enum": ["rename-symbol"] },
+            "file": { "type": "string", "description": "Workspace-relative or absolute Java file path" },
+            "offset": { "type": "integer", "description": "0-based character offset inside the file" },
+            "newName": { "type": "string", "description": "New Java symbol name" }
+          }
+        },
+        "refactor-apply": {
+          "description": "Apply a previously prepared refactoring",
+          "record": "ApplyPreparedRefactoring",
+          "params": {
+            "refactoringId": { "type": "string" }
+          }
+        },
+        "refactor-abort": {
+          "description": "Discard a previously prepared refactoring",
+          "record": "AbortPreparedRefactoring",
+          "params": {
+            "refactoringId": { "type": "string" }
+          }
+        },
+        "refactor-status": {
+          "description": "Inspect a previously prepared refactoring preview",
+          "record": "GetPreparedRefactoring",
+          "params": {
+            "refactoringId": { "type": "string" }
+          }
         }
       },
       "responses": {

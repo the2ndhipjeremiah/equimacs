@@ -62,6 +62,15 @@ class CliParserTest {
     }
 
     @Test
+    void parsesRefactoringCommands() {
+        assertEquals(new Request.PrepareRenameSymbol("/myproject/src/App.java", 123, "betterName"),
+            parse("refactor-prepare", "rename-symbol", "/myproject/src/App.java:123", "--to", "betterName"));
+        assertEquals(new Request.ApplyPreparedRefactoring("rfc_123"), parse("refactor-apply", "rfc_123"));
+        assertEquals(new Request.AbortPreparedRefactoring("rfc_123"), parse("refactor-abort", "rfc_123"));
+        assertEquals(new Request.GetPreparedRefactoring("rfc_123"), parse("refactor-status", "rfc_123"));
+    }
+
+    @Test
     void parsesQuickFixCommands() {
         assertEquals(new Request.GetQuickFixes("/myproject/src/App.java", 7),
             parse("quickfixes", "/myproject/src/App.java:7"));

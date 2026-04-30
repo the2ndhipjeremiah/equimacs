@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import org.eclipse.core.resources.IFile;
@@ -47,9 +48,29 @@ import org.eclipse.debug.core.model.IStackFrame;
 import org.eclipse.debug.core.model.IThread;
 import org.eclipse.debug.core.model.IValue;
 import org.eclipse.debug.core.model.IVariable;
+import org.eclipse.jdt.core.ICompilationUnit;
+import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.debug.core.IJavaLineBreakpoint;
 import org.eclipse.jdt.debug.core.IJavaStackFrame;
+import org.eclipse.jdt.core.refactoring.IJavaRefactorings;
+import org.eclipse.jdt.core.refactoring.descriptors.RenameJavaElementDescriptor;
 import org.eclipse.jdt.debug.core.JDIDebugModel;
+import org.eclipse.ltk.core.refactoring.Change;
+import org.eclipse.ltk.core.refactoring.CheckConditionsOperation;
+import org.eclipse.ltk.core.refactoring.CompositeChange;
+import org.eclipse.ltk.core.refactoring.CreateChangeOperation;
+import org.eclipse.ltk.core.refactoring.PerformChangeOperation;
+import org.eclipse.ltk.core.refactoring.Refactoring;
+import org.eclipse.ltk.core.refactoring.RefactoringContribution;
+import org.eclipse.ltk.core.refactoring.RefactoringCore;
+import org.eclipse.ltk.core.refactoring.RefactoringStatus;
+import org.eclipse.ltk.core.refactoring.RefactoringStatusEntry;
+import org.eclipse.ltk.core.refactoring.TextChange;
+import org.eclipse.ltk.core.refactoring.TextFileChange;
+import org.eclipse.text.edits.DeleteEdit;
+import org.eclipse.text.edits.InsertEdit;
+import org.eclipse.text.edits.ReplaceEdit;
+import org.eclipse.text.edits.TextEdit;
 
 public class JavaDebugController {
     private static final String PLUGIN_ID = "org.equimacs.debug";
@@ -57,9 +78,18 @@ public class JavaDebugController {
 
     private final Map<Long, IThread> threadRegistry = new ConcurrentHashMap<>();
     private final Map<Long, IStackFrame> frameRegistry = new ConcurrentHashMap<>();
+    private final Map<String, PreparedRefactoring> preparedRefactorings = new ConcurrentHashMap<>();
 
     private volatile Consumer<JsonObject> eventSink;
     private IDebugEventSetListener listener;
+
+    private record PreparedRefactoring(
+        String id,
+        String kind,
+        long createdAtMillis,
+        Map<String, Object> preview,
+        Change change
+    ) {}
 
     public void init(Consumer<JsonObject> eventSink) {
         this.eventSink = eventSink;
@@ -103,6 +133,10 @@ public class JavaDebugController {
         eventSink = null;
         threadRegistry.clear();
         frameRegistry.clear();
+        for (PreparedRefactoring refactoring : preparedRefactorings.values()) {
+            refactoring.change().dispose();
+        }
+        preparedRefactorings.clear();
     }
 
     // --- Breakpoints ---
@@ -453,6 +487,247 @@ public class JavaDebugController {
             if (m.getAttribute(IMarker.LINE_NUMBER, -1) == line) atLine.add(m);
         }
         return atLine.toArray(IMarker[]::new);
+    }
+
+    // --- Refactoring ---
+
+    public Map<String, Object> prepareRenameSymbol(String filePath, int offset, String newName) throws CoreException {
+        IResource resource = requireResource(filePath, "Resource not found: " + filePath);
+        if (!(resource instanceof IFile file)) {
+            throw error("Refactoring target is not a file: " + filePath);
+        }
+
+        IJavaElement javaElement = JavaCore.create(file);
+        if (!(javaElement instanceof ICompilationUnit unit)) {
+            throw error("Refactoring target is not a Java compilation unit: " + filePath);
+        }
+
+        IJavaElement[] selected = unit.codeSelect(offset, 0);
+        if (selected.length == 0) {
+            selected = unit.codeSelect(offset, 1);
+        }
+        if (selected.length == 0) {
+            throw error("No Java symbol found at offset " + offset + " in " + filePath);
+        }
+
+        IJavaElement target = selected[0];
+        String refactoringKind = renameRefactoringId(target);
+        RefactoringContribution contribution = RefactoringCore.getRefactoringContribution(refactoringKind);
+        if (contribution == null) {
+            throw error("Rename refactoring is unavailable for " + refactoringKind);
+        }
+
+        RenameJavaElementDescriptor descriptor =
+            (RenameJavaElementDescriptor) contribution.createDescriptor();
+        descriptor.setProject(file.getProject().getName());
+        descriptor.setJavaElement(target);
+        descriptor.setNewName(newName);
+        descriptor.setUpdateReferences(true);
+
+        RefactoringStatus status = descriptor.validateDescriptor();
+        Refactoring refactoring = descriptor.createRefactoring(status);
+        if (refactoring == null) {
+            throw error("Could not create rename refactoring: " + status.toString());
+        }
+
+        CheckConditionsOperation checks =
+            new CheckConditionsOperation(refactoring, CheckConditionsOperation.ALL_CONDITIONS);
+        CreateChangeOperation create =
+            new CreateChangeOperation(checks, RefactoringCore.getConditionCheckingFailedSeverity());
+        ResourcesPlugin.getWorkspace().run(create, NULL_MONITOR);
+        status.merge(create.getConditionCheckingStatus());
+
+        Change change = create.getChange();
+        if (change == null) {
+            throw error("Rename refactoring did not produce a change: " + status.toString());
+        }
+
+        String id = "rfc_" + UUID.randomUUID().toString().replace("-", "");
+        Map<String, Object> preview = previewForChange(id, "rename-symbol", status, change);
+        preview.put("symbol", target.getElementName());
+        preview.put("newName", newName);
+
+        preparedRefactorings.put(id, new PreparedRefactoring(
+            id,
+            "rename-symbol",
+            System.currentTimeMillis(),
+            preview,
+            change));
+        return preview;
+    }
+
+    public Map<String, Object> getPreparedRefactoring(String refactoringId) throws CoreException {
+        PreparedRefactoring refactoring = preparedRefactorings.get(refactoringId);
+        if (refactoring == null) {
+            throw error("Prepared refactoring not found: " + refactoringId);
+        }
+        return refactoring.preview();
+    }
+
+    public Map<String, Object> abortPreparedRefactoring(String refactoringId) throws CoreException {
+        PreparedRefactoring refactoring = preparedRefactorings.remove(refactoringId);
+        if (refactoring == null) {
+            throw error("Prepared refactoring not found: " + refactoringId);
+        }
+        refactoring.change().dispose();
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("refactoringId", refactoringId);
+        result.put("kind", refactoring.kind());
+        result.put("aborted", true);
+        return result;
+    }
+
+    public Map<String, Object> applyPreparedRefactoring(String refactoringId) throws CoreException {
+        PreparedRefactoring refactoring = preparedRefactorings.remove(refactoringId);
+        if (refactoring == null) {
+            throw error("Prepared refactoring not found: " + refactoringId);
+        }
+
+        Change change = refactoring.change();
+        try {
+            PerformChangeOperation perform = new PerformChangeOperation(change);
+            ResourcesPlugin.getWorkspace().run(perform, NULL_MONITOR);
+            RefactoringStatus validation = perform.getValidationStatus();
+            if (validation != null && validation.hasError()) {
+                throw error("Prepared refactoring is no longer valid: " + validation.toString());
+            }
+
+            Map<String, Object> summary = castMap(refactoring.preview().get("summary"));
+            Map<String, Object> result = new HashMap<>();
+            result.put("refactoringId", refactoringId);
+            result.put("kind", refactoring.kind());
+            result.put("applied", true);
+            result.put("filesChanged", summary.get("filesChanged"));
+            result.put("textEdits", summary.get("textEdits"));
+            return result;
+        } finally {
+            change.dispose();
+        }
+    }
+
+    private String renameRefactoringId(IJavaElement element) throws CoreException {
+        return switch (element.getElementType()) {
+            case IJavaElement.LOCAL_VARIABLE -> IJavaRefactorings.RENAME_LOCAL_VARIABLE;
+            case IJavaElement.FIELD -> IJavaRefactorings.RENAME_FIELD;
+            case IJavaElement.METHOD -> IJavaRefactorings.RENAME_METHOD;
+            case IJavaElement.TYPE -> IJavaRefactorings.RENAME_TYPE;
+            default -> throw error("Unsupported rename target: " + element.getElementName());
+        };
+    }
+
+    private Map<String, Object> previewForChange(
+        String refactoringId,
+        String kind,
+        RefactoringStatus status,
+        Change change
+    ) throws CoreException {
+        List<Map<String, Object>> changes = new ArrayList<>();
+        collectChangePreview(change, changes);
+
+        int textEdits = 0;
+        for (Map<String, Object> entry : changes) {
+            textEdits += ((List<?>) entry.get("edits")).size();
+        }
+
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("filesChanged", changes.size());
+        summary.put("textEdits", textEdits);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("refactoringId", refactoringId);
+        result.put("kind", kind);
+        result.put("status", statusToMap(status));
+        result.put("summary", summary);
+        result.put("changes", changes);
+        return result;
+    }
+
+    private void collectChangePreview(Change change, List<Map<String, Object>> changes) throws CoreException {
+        if (change instanceof CompositeChange composite) {
+            for (Change child : composite.getChildren()) {
+                collectChangePreview(child, changes);
+            }
+            return;
+        }
+
+        if (change instanceof TextChange textChange) {
+            Map<String, Object> entry = new HashMap<>();
+            if (change instanceof TextFileChange fileChange) {
+                entry.put("file", fileChange.getFile().getFullPath().toString());
+            } else {
+                Object modified = change.getModifiedElement();
+                entry.put("file", modified != null ? modified.toString() : change.getName());
+            }
+
+            List<Map<String, Object>> edits = new ArrayList<>();
+            TextEdit root = textChange.getEdit();
+            if (root != null) {
+                collectTextEdits(root, edits);
+            }
+            if (!edits.isEmpty()) {
+                entry.put("edits", edits);
+                changes.add(entry);
+            }
+        }
+    }
+
+    private void collectTextEdits(TextEdit edit, List<Map<String, Object>> edits) {
+        if (edit.hasChildren()) {
+            for (TextEdit child : edit.getChildren()) {
+                collectTextEdits(child, edits);
+            }
+            return;
+        }
+
+        Map<String, Object> entry = new HashMap<>();
+        if (edit instanceof ReplaceEdit replace) {
+            entry.put("start", replace.getOffset());
+            entry.put("end", replace.getOffset() + replace.getLength());
+            entry.put("replacement", replace.getText());
+        } else if (edit instanceof InsertEdit insert) {
+            entry.put("start", insert.getOffset());
+            entry.put("end", insert.getOffset());
+            entry.put("replacement", insert.getText());
+        } else if (edit instanceof DeleteEdit delete) {
+            entry.put("start", delete.getOffset());
+            entry.put("end", delete.getOffset() + delete.getLength());
+            entry.put("replacement", "");
+        } else {
+            return;
+        }
+        edits.add(entry);
+    }
+
+    private Map<String, Object> statusToMap(RefactoringStatus status) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("ok", !status.hasError() && !status.hasFatalError());
+        result.put("severity", severityName(status.getSeverity()));
+
+        List<Map<String, Object>> entries = new ArrayList<>();
+        for (RefactoringStatusEntry entry : status.getEntries()) {
+            Map<String, Object> info = new HashMap<>();
+            info.put("severity", severityName(entry.getSeverity()));
+            info.put("message", entry.getMessage());
+            entries.add(info);
+        }
+        result.put("entries", entries);
+        return result;
+    }
+
+    private String severityName(int severity) {
+        return switch (severity) {
+            case RefactoringStatus.FATAL -> "fatal";
+            case RefactoringStatus.ERROR -> "error";
+            case RefactoringStatus.WARNING -> "warning";
+            case RefactoringStatus.INFO -> "info";
+            default -> "ok";
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> castMap(Object value) {
+        return (Map<String, Object>) value;
     }
 
     // --- Project Config ---

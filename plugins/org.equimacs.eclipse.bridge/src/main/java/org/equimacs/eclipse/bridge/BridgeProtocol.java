@@ -43,6 +43,10 @@ final class BridgeProtocol {
             case "GetClasspath" -> Request.GetClasspath.class;
             case "GetProjectDescription" -> Request.GetProjectDescription.class;
             case "RefreshProject" -> Request.RefreshProject.class;
+            case "PrepareRenameSymbol" -> Request.PrepareRenameSymbol.class;
+            case "ApplyPreparedRefactoring" -> Request.ApplyPreparedRefactoring.class;
+            case "AbortPreparedRefactoring" -> Request.AbortPreparedRefactoring.class;
+            case "GetPreparedRefactoring" -> Request.GetPreparedRefactoring.class;
             case "WaitEvent" -> Request.WaitEvent.class;
             case "Launch" -> Request.Launch.class;
             case "ListLaunches" -> Request.ListLaunches.class;

@@ -67,6 +67,10 @@ final class EqmdHarness implements AutoCloseable {
         return rpc;
     }
 
+    Path workspace() {
+        return home.resolve("workspace");
+    }
+
     @Override
     public void close() throws Exception {
         try {

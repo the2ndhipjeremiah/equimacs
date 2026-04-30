@@ -94,6 +94,39 @@ public class EquimacsCLI {
                     if (args.size() < 2) throw new CliParseException("Usage: refresh <project>");
                     yield new Request.RefreshProject(args.get(1));
                 }
+                case "refactor-prepare" -> {
+                    if (args.size() < 3 || !args.get(1).equals("rename-symbol")) {
+                        throw new CliParseException(
+                            "Usage: refactor-prepare rename-symbol <file>:<offset> --to <newName>");
+                    }
+                    String newName = cli.getOption("to");
+                    if (newName == null || newName.isBlank()) {
+                        throw new CliParseException(
+                            "Usage: refactor-prepare rename-symbol <file>:<offset> --to <newName>");
+                    }
+                    String spec = args.get(2);
+                    int lastColon = spec.lastIndexOf(':');
+                    if (lastColon <= 0) {
+                        throw new CliParseException(
+                            "Usage: refactor-prepare rename-symbol <file>:<offset> --to <newName>");
+                    }
+                    yield new Request.PrepareRenameSymbol(
+                        spec.substring(0, lastColon),
+                        Integer.parseInt(spec.substring(lastColon + 1)),
+                        newName);
+                }
+                case "refactor-apply" -> {
+                    if (args.size() < 2) throw new CliParseException("Usage: refactor-apply <refactoringId>");
+                    yield new Request.ApplyPreparedRefactoring(args.get(1));
+                }
+                case "refactor-abort" -> {
+                    if (args.size() < 2) throw new CliParseException("Usage: refactor-abort <refactoringId>");
+                    yield new Request.AbortPreparedRefactoring(args.get(1));
+                }
+                case "refactor-status" -> {
+                    if (args.size() < 2) throw new CliParseException("Usage: refactor-status <refactoringId>");
+                    yield new Request.GetPreparedRefactoring(args.get(1));
+                }
                 case "quickfixes" -> {
                     if (args.size() < 2) throw new CliParseException("Usage: quickfixes <file>:<line>");
                     String spec = args.get(1);
