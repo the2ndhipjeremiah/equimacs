@@ -1,7 +1,17 @@
 package org.equimacs.eclipse.app;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.stream.Stream;
 import org.eclipse.equinox.app.IApplication;
 import org.eclipse.equinox.app.IApplicationContext;
+import org.eclipse.core.resources.IProject;
+import org.eclipse.core.resources.IProjectDescription;
+import org.eclipse.core.resources.IWorkspace;
+import org.eclipse.core.resources.IWorkspaceRoot;
+import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.NullProgressMonitor;
 import org.equimacs.eclipse.bridge.api.IBridgeCommandHandler;
 import org.equimacs.eclipse.bridge.api.IBridgeService;
 import org.equimacs.protocol.Request;
@@ -23,6 +33,7 @@ public final class HeadlessApp implements IApplication {
         registerShutdownHandler();
         log("HeadlessApp.start: forcing bridge service activation");
         forceBridgeActivation();
+        importWorkspaceProjects();
         log("HeadlessApp.start: bridge active, parking main thread");
         synchronized (shutdownLock) {
             while (!stopRequested) {
@@ -88,6 +99,36 @@ public final class HeadlessApp implements IApplication {
             return;
         }
         log("Bridge service obtained: " + svc.getClass().getName());
+    }
+
+    private static void importWorkspaceProjects() {
+        IWorkspace workspace = ResourcesPlugin.getWorkspace();
+        IWorkspaceRoot root = workspace.getRoot();
+        org.eclipse.core.runtime.IPath rootLocation = root.getLocation();
+        if (rootLocation == null) return;
+
+        Path rootPath = Path.of(rootLocation.toOSString());
+        if (!Files.isDirectory(rootPath)) return;
+
+        try (Stream<Path> stream = Files.list(rootPath)) {
+            for (Path candidate : stream.filter(Files::isDirectory).toList()) {
+                Path projectFile = candidate.resolve(".project");
+                if (!Files.isRegularFile(projectFile)) continue;
+
+                IProjectDescription desc = workspace.loadProjectDescription(
+                    new org.eclipse.core.runtime.Path(projectFile.toString()));
+                IProject project = root.getProject(desc.getName());
+                if (!project.exists()) {
+                    project.create(desc, new NullProgressMonitor());
+                    log("Imported workspace project: " + desc.getName());
+                }
+                if (!project.isOpen()) {
+                    project.open(new NullProgressMonitor());
+                }
+            }
+        } catch (IOException | org.eclipse.core.runtime.CoreException e) {
+            log("WARN: failed to import workspace projects: " + e.getMessage());
+        }
     }
 
     private static void log(String message) {

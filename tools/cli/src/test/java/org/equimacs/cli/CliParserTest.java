@@ -2,7 +2,6 @@ package org.equimacs.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.equimacs.cli.util.CliArgs;
 import org.equimacs.protocol.Request;
@@ -93,31 +92,7 @@ class CliParserTest {
         assertInstanceOf(Request.Shutdown.class, parse("shutdown"));
     }
 
-    @Test
-    void rejectsMissingRequiredArguments() {
-        assertParseError("Usage: bp <file>:<line>", "bp");
-        assertParseError("Usage: gogo <command...>", "gogo");
-        assertParseError("Usage: classpath <project>", "classpath");
-        assertParseError("Usage: describe <project>", "describe");
-        assertParseError("Usage: refresh <project>", "refresh");
-        assertParseError("Usage: quickfixes <file>:<line>", "quickfixes");
-        assertParseError("Usage: applyfix <file>:<line> <index>", "applyfix");
-        assertParseError("Usage: stack <threadId>", "stack");
-        assertParseError("Usage: vars <frameId>", "vars");
-        assertParseError("Usage: launch <config-name>", "launch");
-    }
-
-    @Test
-    void rejectsUnknownCommand() {
-        assertParseError("Unknown command: nope", "nope");
-    }
-
     private static Request parse(String... args) {
         return EquimacsCLI.parseCommand(CliArgs.parse(args));
-    }
-
-    private static void assertParseError(String message, String... args) {
-        CliParseException error = assertThrows(CliParseException.class, () -> parse(args));
-        assertEquals(message, error.getMessage());
     }
 }

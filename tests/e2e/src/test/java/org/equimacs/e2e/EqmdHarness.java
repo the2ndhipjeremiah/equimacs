@@ -3,11 +3,14 @@ package org.equimacs.e2e;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
+import com.google.gson.JsonObject;
 import org.equimacs.protocol.Request;
 
 final class EqmdHarness implements AutoCloseable {
@@ -27,6 +30,10 @@ final class EqmdHarness implements AutoCloseable {
     }
 
     static EqmdHarness start() throws Exception {
+        return startWithFixture(null);
+    }
+
+    static EqmdHarness startWithFixture(String fixtureName) throws Exception {
         Path repo = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
         Path workspaces = repo.resolve("tests/e2e/workspaces");
         Files.createDirectories(workspaces);
@@ -35,6 +42,9 @@ final class EqmdHarness implements AutoCloseable {
         Path workspace = home.resolve("workspace");
         Path socket = home.resolve("equimacs.sock");
         Path log = home.resolve("eqmd.log");
+        if (fixtureName != null && !fixtureName.isBlank()) {
+            copyDir(repo.resolve("tests/e2e/fixtures").resolve(fixtureName), workspace.resolve(fixtureName));
+        }
 
         String eclipseHome = requireEclipseHome(repo);
         ProcessBuilder pb = new ProcessBuilder(eqmdCommand(repo));
@@ -82,7 +92,7 @@ final class EqmdHarness implements AutoCloseable {
                 throw new AssertionError("eqmd exited during startup. Log:\n" + logTail());
             }
             try {
-                var response = rpc.request(new Request.WaitEvent(1));
+                JsonObject response = rpc.request(new Request.WaitEvent(1));
                 if (response.has("result")
                     && response.getAsJsonObject("result").has("event")
                     && response.getAsJsonObject("result").get("event").getAsString().equals("Timeout")) {
@@ -131,9 +141,26 @@ final class EqmdHarness implements AutoCloseable {
 
     private static void deleteDir(Path path) throws IOException {
         if (!Files.exists(path)) return;
-        try (var stream = Files.walk(path)) {
+        try (Stream<Path> stream = Files.walk(path)) {
             for (Path p : stream.sorted(Comparator.reverseOrder()).toList()) {
                 Files.deleteIfExists(p);
+            }
+        }
+    }
+
+    private static void copyDir(Path source, Path target) throws IOException {
+        if (!Files.exists(source)) {
+            throw new IOException("Fixture not found: " + source);
+        }
+        try (Stream<Path> stream = Files.walk(source)) {
+            for (Path src : stream.toList()) {
+                Path dest = target.resolve(source.relativize(src));
+                if (Files.isDirectory(src)) {
+                    Files.createDirectories(dest);
+                } else {
+                    Files.createDirectories(dest.getParent());
+                    Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
+                }
             }
         }
     }
