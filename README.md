@@ -35,6 +35,10 @@ eqm-cli build [project] [-k full|incremental|clean|auto]
 eqm-cli classpath <project>
 eqm-cli describe <project>
 eqm-cli refresh <project>
+eqm-cli refactor-prepare rename-symbol <file>:<offset> --to <newName>
+eqm-cli refactor-apply <refactoringId>
+eqm-cli refactor-abort <refactoringId>
+eqm-cli refactor-status <refactoringId>
 eqm-cli quickfixes <file>:<line>
 eqm-cli applyfix <file>:<line> <index>
 eqm-cli wait-event [--timeout <ms>]
