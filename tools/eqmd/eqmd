@@ -23,10 +23,19 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EQMD_INI="$SCRIPT_DIR/eqmd.ini"
+JAVA_VM_ARGS=()
+if [[ -n "${JAVA_HOME:-}" ]]; then
+    if [[ -x "$JAVA_HOME/bin/javaw.exe" ]]; then
+        JAVA_VM_ARGS=(-vm "$JAVA_HOME/bin/javaw.exe")
+    elif [[ -x "$JAVA_HOME/bin/java" ]]; then
+        JAVA_VM_ARGS=(-vm "$JAVA_HOME/bin/java")
+    fi
+fi
 
 exec "$LAUNCHER" \
     --launcher.ini "$EQMD_INI" \
     -nosplash -consoleLog \
+    "${JAVA_VM_ARGS[@]}" \
     -application org.equimacs.eclipse.app.application \
     -data "$WORKSPACE" \
     "$@"

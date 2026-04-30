@@ -24,8 +24,24 @@ set "ECLIPSEC=%ECLIPSE_HOME%\eclipsec.exe"
 if not exist "%ECLIPSEC%" set "ECLIPSEC=%ECLIPSE_HOME%\eclipse.exe"
 
 set "EQMD_INI=%~dp0eqmd.ini"
+set "JAVA_VM="
+if not "%JAVA_HOME%"=="" (
+    if exist "%JAVA_HOME%\bin\javaw.exe" (
+        set "JAVA_VM=%JAVA_HOME%\bin\javaw.exe"
+    ) else if exist "%JAVA_HOME%\bin\java.exe" (
+        set "JAVA_VM=%JAVA_HOME%\bin\java.exe"
+    )
+)
 
-"%ECLIPSEC%" --launcher.ini "%EQMD_INI%" -nosplash -consoleLog ^
-    -application org.equimacs.eclipse.app.application ^
-    -data "%EQUIMACS_WORKSPACE%" ^
-    %*
+if not "%JAVA_VM%"=="" (
+    "%ECLIPSEC%" --launcher.ini "%EQMD_INI%" -nosplash -consoleLog ^
+        -vm "%JAVA_VM%" ^
+        -application org.equimacs.eclipse.app.application ^
+        -data "%EQUIMACS_WORKSPACE%" ^
+        %*
+) else (
+    "%ECLIPSEC%" --launcher.ini "%EQMD_INI%" -nosplash -consoleLog ^
+        -application org.equimacs.eclipse.app.application ^
+        -data "%EQUIMACS_WORKSPACE%" ^
+        %*
+)
