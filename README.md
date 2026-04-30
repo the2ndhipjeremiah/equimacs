@@ -70,7 +70,7 @@ eqm-mgr reproduce
 
 ## Build
 
-This repo uses [Build.java](/C:/Users/the2nd/equimacs/Build.java) rather than Gradle.
+This repo uses `Build.java` rather than Gradle.
 
 Environment is read from `.env`:
 
