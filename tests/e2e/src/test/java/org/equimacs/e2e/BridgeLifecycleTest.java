@@ -33,4 +33,26 @@ class BridgeLifecycleTest {
         assertTrue(output.contains("Equimacs Headless Application"), output);
         assertTrue(output.contains("Active"), output);
     }
+
+    @Test
+    void bridgeReloadRecovers() throws Exception {
+        EqmdHarness reloadHarness = EqmdHarness.start();
+        try {
+            JsonObject beforeReload = reloadHarness.rpc().request(new Request.ListBreakpoints());
+            assertTrue(beforeReload.has("result"), beforeReload::toString);
+
+            JsonObject reload = reloadHarness.rpc().request(new Request.Reload());
+            assertTrue(reload.has("result"), reload::toString);
+            assertTrue(reload.get("result").getAsString().startsWith("Reloading..."), reload::toString);
+
+            Thread.sleep(1_000);
+            reloadHarness.awaitReady();
+
+            JsonObject afterReload = reloadHarness.rpc().request(new Request.ListBreakpoints());
+            assertTrue(afterReload.has("result"), afterReload::toString);
+            assertTrue(afterReload.get("result").isJsonArray(), afterReload::toString);
+        } finally {
+            reloadHarness.destroyForcibly();
+        }
+    }
 }

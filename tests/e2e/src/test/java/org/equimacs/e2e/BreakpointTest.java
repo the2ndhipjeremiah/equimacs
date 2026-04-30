@@ -46,4 +46,23 @@ class BreakpointTest {
         assertEquals("Hello", breakpoint.get("typeName").getAsString());
         assertTrue(breakpoint.get("enabled").getAsBoolean(), listed::toString);
     }
+
+    @Test
+    void clearAllBreakpoints() throws Exception {
+        JsonObject first = harness.rpc().request(new Request.SetBreakpoint("/hello-java/src/Hello.java", 4, null));
+        assertTrue(first.has("result"), first::toString);
+        JsonObject second = harness.rpc().request(new Request.SetBreakpoint("/hello-java/src/Hello.java", 5, null));
+        assertTrue(second.has("result"), second::toString);
+
+        JsonObject beforeClear = harness.rpc().request(new Request.ListBreakpoints());
+        assertTrue(beforeClear.has("result"), beforeClear::toString);
+        assertEquals(2, beforeClear.getAsJsonArray("result").size(), beforeClear::toString);
+
+        JsonObject clear = harness.rpc().request(new Request.ClearAllBreakpoints());
+        assertTrue(clear.has("result"), clear::toString);
+
+        JsonObject afterClear = harness.rpc().request(new Request.ListBreakpoints());
+        assertTrue(afterClear.has("result"), afterClear::toString);
+        assertEquals(0, afterClear.getAsJsonArray("result").size(), afterClear::toString);
+    }
 }

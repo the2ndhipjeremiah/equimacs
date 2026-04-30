@@ -84,7 +84,18 @@ final class EqmdHarness implements AutoCloseable {
         }
     }
 
-    private void awaitReady() throws Exception {
+    void destroyForcibly() throws Exception {
+        try {
+            if (process.isAlive()) {
+                process.destroyForcibly();
+                process.waitFor(SHUTDOWN_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            }
+        } finally {
+            deleteDir(home);
+        }
+    }
+
+    void awaitReady() throws Exception {
         long deadline = System.nanoTime() + STARTUP_TIMEOUT.toNanos();
         Exception last = null;
         while (System.nanoTime() < deadline) {
@@ -141,11 +152,25 @@ final class EqmdHarness implements AutoCloseable {
 
     private static void deleteDir(Path path) throws IOException {
         if (!Files.exists(path)) return;
-        try (Stream<Path> stream = Files.walk(path)) {
-            for (Path p : stream.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(p);
+        IOException last = null;
+        for (int attempt = 0; attempt < 5; attempt++) {
+            try (Stream<Path> stream = Files.walk(path)) {
+                for (Path p : stream.sorted(Comparator.reverseOrder()).toList()) {
+                    Files.deleteIfExists(p);
+                }
+                return;
+            } catch (IOException e) {
+                last = e;
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
             }
         }
+        System.err.println("Warning: could not delete temporary eqmd workspace "
+            + path + ": " + last.getMessage());
     }
 
     private static void copyDir(Path source, Path target) throws IOException {

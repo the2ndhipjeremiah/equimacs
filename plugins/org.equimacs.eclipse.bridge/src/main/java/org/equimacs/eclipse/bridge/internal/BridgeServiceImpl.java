@@ -275,6 +275,7 @@ public final class BridgeServiceImpl implements IBridgeService {
         for (Bundle bundle : ctx.getBundles()) {
             String name = bundle.getSymbolicName();
             if (name == null || !name.startsWith("org.equimacs.")) continue;
+            if (name.equals("org.equimacs.eclipse.app")) continue;
             Path jar = latest.get(name);
             if (jar == null) continue;
             Activator.logInfo("Reload: updating " + name + " from " + jar);
