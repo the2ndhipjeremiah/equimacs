@@ -167,6 +167,47 @@ public class EquimacsCLI {
                 case "sessions" -> new Request.ListSessions();
                 case "terminate" -> new Request.Terminate();
                 case "shutdown" -> new Request.Shutdown();
+                case "review-add" -> {
+                    if (args.size() < 3) throw new CliParseException("Usage: review-add <file>:<line> <text...> [--author <name>]");
+                    String spec = args.get(1);
+                    int lastColon = spec.lastIndexOf(':');
+                    if (lastColon <= 0) throw new CliParseException("Usage: review-add <file>:<line> <text...>");
+                    String author = cli.getOption("author", "a");
+                    if (author == null) author = "user";
+                    String text = String.join(" ", args.subList(2, args.size()));
+                    yield new Request.AddReviewComment(
+                        spec.substring(0, lastColon),
+                        Integer.parseInt(spec.substring(lastColon + 1)),
+                        author, text);
+                }
+                case "review-list" -> new Request.ListReviewComments(args.size() > 1 ? args.get(1) : null);
+                case "review-reply" -> {
+                    if (args.size() < 3) throw new CliParseException("Usage: review-reply <commentId> <text...> [--author <name>]");
+                    String author = cli.getOption("author", "a");
+                    if (author == null) author = "user";
+                    String text = String.join(" ", args.subList(2, args.size()));
+                    yield new Request.ReplyToComment(args.get(1), author, text);
+                }
+                case "review-resolve" -> {
+                    if (args.size() < 2) throw new CliParseException("Usage: review-resolve <commentId>");
+                    yield new Request.ResolveComment(args.get(1));
+                }
+                case "review-diagnostics" -> new Request.ReviewDiagnostics(args.size() > 1 ? args.get(1) : null);
+                case "eclipse-workbench" -> new Request.EclipseWorkbench();
+                case "eclipse-editor-diagnostics" -> new Request.EclipseEditorDiagnostics();
+                case "review-editor-diagnostics" -> {
+                    if (args.size() < 2) {
+                        yield new Request.ReviewEditorDiagnostics(null, -1);
+                    }
+                    String spec = args.get(1);
+                    int lastColon = spec.lastIndexOf(':');
+                    if (lastColon <= 0) {
+                        yield new Request.ReviewEditorDiagnostics(spec, -1);
+                    }
+                    yield new Request.ReviewEditorDiagnostics(
+                        spec.substring(0, lastColon),
+                        Integer.parseInt(spec.substring(lastColon + 1)));
+                }
                 default -> {
                     throw new CliParseException("Unknown command: " + cmd);
                 }

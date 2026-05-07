@@ -107,6 +107,64 @@ public class ProtocolSchema {
           "params": {
             "refactoringId": { "type": "string" }
           }
+        },
+        "review-add": {
+          "description": "Post a review comment on a file:line",
+          "record": "AddReviewComment",
+          "params": {
+            "file": { "type": "string", "description": "Workspace-relative file path" },
+            "line": { "type": "integer", "description": "1-based line number" },
+            "author": { "type": "string", "description": "Author name (default: user)" },
+            "text": { "type": "string", "description": "Comment body" }
+          }
+        },
+        "review-list": {
+          "description": "List review comment threads, optionally filtered to a file",
+          "record": "ListReviewComments",
+          "params": {
+            "file": { "type": "string", "optional": true, "description": "Workspace-relative file path; omit for all" }
+          }
+        },
+        "review-reply": {
+          "description": "Reply to an existing review comment thread",
+          "record": "ReplyToComment",
+          "params": {
+            "commentId": { "type": "string" },
+            "author": { "type": "string", "description": "Author name (default: user)" },
+            "text": { "type": "string" }
+          }
+        },
+        "review-resolve": {
+          "description": "Mark a review comment thread as resolved",
+          "record": "ResolveComment",
+          "params": {
+            "commentId": { "type": "string" }
+          }
+        },
+        "review-diagnostics": {
+          "description": "Inspect review comments, markers, and annotation preferences",
+          "record": "ReviewDiagnostics",
+          "params": {
+            "file": { "type": "string", "optional": true, "description": "Workspace-relative file path; omit for all" }
+          }
+        },
+        "eclipse-workbench": {
+          "description": "Inspect active Eclipse workbench/window/page/editor state",
+          "record": "EclipseWorkbench",
+          "params": {}
+        },
+        "eclipse-editor-diagnostics": {
+          "description": "Inspect the active Eclipse editor, document, selection, and annotation model",
+          "record": "EclipseEditorDiagnostics",
+          "params": {}
+        },
+        "review-editor-diagnostics": {
+          "description": "Inspect review annotations in the active Eclipse editor",
+          "record": "ReviewEditorDiagnostics",
+          "params": {
+            "file": { "type": "string", "optional": true, "description": "Workspace-relative file path" },
+            "line": { "type": "integer", "optional": true, "description": "1-based line number" }
+          }
         }
       },
       "responses": {

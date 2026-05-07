@@ -52,6 +52,16 @@ public sealed interface Request {
     record ListSessions() implements Request {}
     record Terminate() implements Request {}
 
+    // --- Review ---
+    record AddReviewComment(String file, int line, String author, String text) implements Request {}
+    record ListReviewComments(String file) implements Request {}
+    record ReplyToComment(String commentId, String author, String text) implements Request {}
+    record ResolveComment(String commentId) implements Request {}
+    record ReviewDiagnostics(String file) implements Request {}
+    record EclipseWorkbench() implements Request {}
+    record EclipseEditorDiagnostics() implements Request {}
+    record ReviewEditorDiagnostics(String file, int line) implements Request {}
+
     // --- Headless Daemon ---
     record Shutdown() implements Request {}
 

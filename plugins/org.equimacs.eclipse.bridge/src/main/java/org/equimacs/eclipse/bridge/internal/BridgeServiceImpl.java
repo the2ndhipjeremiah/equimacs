@@ -38,6 +38,8 @@ public final class BridgeServiceImpl implements IBridgeService {
 
     private static final int WORKSPACE_READY_ATTEMPTS = 120;
     private static final long WORKSPACE_READY_INTERVAL_MS = 500;
+    private static final String UI_BUNDLE_ID = "org.equimacs.eclipse.ui";
+    private static final String APP_BUNDLE_ID = "org.equimacs.eclipse.app";
 
     private final BlockingQueue<JsonObject> eventQueue = new LinkedBlockingQueue<>();
     private final Map<String, IBridgeCommandHandler> dispatchMap = new ConcurrentHashMap<>();
@@ -275,7 +277,11 @@ public final class BridgeServiceImpl implements IBridgeService {
         for (Bundle bundle : ctx.getBundles()) {
             String name = bundle.getSymbolicName();
             if (name == null || !name.startsWith("org.equimacs.")) continue;
-            if (name.equals("org.equimacs.eclipse.app")) continue;
+            if (name.equals(APP_BUNDLE_ID)) continue;
+            if (name.equals(UI_BUNDLE_ID)) {
+                Activator.logInfo("Reload: skipping UI bundle; workbench extension registry requires Eclipse restart");
+                continue;
+            }
             Path jar = latest.get(name);
             if (jar == null) continue;
             Activator.logInfo("Reload: updating " + name + " from " + jar);

@@ -18,6 +18,8 @@ public class Build {
     private static final String DEBUG_BUNDLE_VERSION = "1.0.0.qualifier";
     private static final String APP_BUNDLE_ID = "org.equimacs.eclipse.app";
     private static final String APP_BUNDLE_VERSION = "1.0.0.qualifier";
+    private static final String UI_BUNDLE_ID = "org.equimacs.eclipse.ui";
+    private static final String UI_BUNDLE_VERSION = "1.0.0.qualifier";
     private static final Map<String, String> LIBS = new LinkedHashMap<>();
     private static boolean RUN_TESTS;
     private static boolean RUN_E2E;
@@ -45,6 +47,7 @@ public class Build {
             }
             buildBridge();
             buildDebug();
+            buildUi();
             buildApp();
             buildCLI();
             buildMgr();
@@ -141,6 +144,49 @@ public class Build {
 
             packageDebugBundle(debugDir, out);
         });
+    }
+
+    private static void buildUi() throws Exception {
+        step("ui", () -> {
+            Path uiDir = ROOT.resolve("plugins/org.equimacs.eclipse.ui");
+            Path src = uiDir.resolve("src/main/java");
+            Path out = uiDir.resolve("build/classes");
+            if (Files.exists(out)) deleteDir(out);
+            Files.createDirectories(out);
+
+            String cp = findEclipseJars()
+                + File.pathSeparator + ROOT.resolve("plugins/org.equimacs.eclipse.bridge/build/classes")
+                + File.pathSeparator + ROOT.resolve("libs/protocol/build/libs/protocol.jar")
+                + File.pathSeparator + getLib("gson")
+                + File.pathSeparator + getLib("osgi-annotations");
+
+            List<String> javacCmd = new ArrayList<>(List.of(getJavac(), "-cp", cp, "-d", out.toString(), "--release", "26"));
+            try (Stream<Path> s = Files.walk(src)) {
+                s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
+            }
+            runProcess(javacCmd);
+
+            packageUiBundle(uiDir, out);
+        });
+    }
+
+    private static void packageUiBundle(Path uiDir, Path classes) throws Exception {
+        Path staging = uiDir.resolve("build/bundle");
+        Path jarOut = uiDir.resolve("build/libs/org.equimacs.eclipse.ui.jar");
+
+        deleteDir(staging);
+        Files.createDirectories(staging);
+        Files.createDirectories(jarOut.getParent());
+
+        copyDir(classes, staging);
+        Files.copy(uiDir.resolve("plugin.xml"), staging.resolve("plugin.xml"), StandardCopyOption.REPLACE_EXISTING);
+        copyOsgiInf(uiDir, staging);
+
+        Files.deleteIfExists(jarOut);
+        runProcess(List.of(getJar(), "--create",
+            "--file", jarOut.toString(),
+            "--manifest", uiDir.resolve("META-INF/MANIFEST.MF").toString(),
+            "-C", staging.toString(), "."));
     }
 
     private static void buildApp() throws Exception {
@@ -498,6 +544,8 @@ public class Build {
             ROOT.resolve("plugins/org.equimacs.debug/build/libs/org.equimacs.debug.jar"));
         deployBundle(APP_BUNDLE_ID, APP_BUNDLE_VERSION,
             ROOT.resolve("plugins/org.equimacs.eclipse.app/build/libs/org.equimacs.eclipse.app.jar"));
+        deployBundle(UI_BUNDLE_ID, UI_BUNDLE_VERSION,
+            ROOT.resolve("plugins/org.equimacs.eclipse.ui/build/libs/org.equimacs.eclipse.ui.jar"));
     }
 
     private static void deployBundle(String bundleId, String version, Path jar) throws IOException {
@@ -525,7 +573,7 @@ public class Build {
         String installedName = bundleId + "_" + version + "-" + System.currentTimeMillis() + ".jar";
         Path installedJar = plugins.resolve(installedName);
         Files.copy(jar, installedJar, StandardCopyOption.REPLACE_EXISTING);
-        cleanOldInstalledBundleJars(plugins, bundleId, version, installedName);
+        cleanOldInstalledBundleJarsIfEclipseStopped(plugins, bundleId, version, installedName);
 
         Path bundlesInfo = eclipse.resolve("configuration/org.eclipse.equinox.simpleconfigurator/bundles.info");
         Files.createDirectories(bundlesInfo.getParent());
@@ -539,6 +587,35 @@ public class Build {
         lines.add(entry);
         Files.write(bundlesInfo, lines);
         System.out.println("  [deploy] -> " + installedJar + " (simpleconfigurator)");
+    }
+
+    private static void cleanOldInstalledBundleJarsIfEclipseStopped(Path plugins, String bundleId, String version, String keepName) throws IOException {
+        if (isEclipseRunning()) {
+            System.out.println("  [deploy] keeping old " + bundleId + " jars: Eclipse is running");
+            return;
+        }
+        cleanOldInstalledBundleJars(plugins, bundleId, version, keepName);
+    }
+
+    private static boolean isEclipseRunning() {
+        ProcessHandle current = ProcessHandle.current();
+        return ProcessHandle.allProcesses()
+            .filter(p -> p.pid() != current.pid())
+            .map(ProcessHandle::info)
+            .map(ProcessHandle.Info::command)
+            .flatMap(Optional::stream)
+            .map(Build::executableName)
+            .anyMatch(name -> name.equals("eclipse.exe") || name.equals("eclipsec.exe")
+                || name.equals("eclipse") || name.equals("eclipsec"));
+    }
+
+    private static String executableName(String command) {
+        try {
+            return Path.of(command).getFileName().toString().toLowerCase(Locale.ROOT);
+        } catch (InvalidPathException e) {
+            int slash = Math.max(command.lastIndexOf('/'), command.lastIndexOf('\\'));
+            return command.substring(slash + 1).toLowerCase(Locale.ROOT);
+        }
     }
 
     private static void cleanOldInstalledBundleJars(Path plugins, String bundleId, String version, String keepName) throws IOException {
@@ -569,7 +646,9 @@ public class Build {
             "org.eclipse.core.contenttype_", "org.eclipse.swt.win32.win32.x86_64_",
             "org.apache.felix.gogo.runtime_", "org.eclipse.ui.ide_", "com.google.gson_",
             "org.eclipse.equinox.app_", "org.eclipse.jdt.core.manipulation_",
-            "org.eclipse.ltk.core.refactoring_", "org.eclipse.text_", "org.eclipse.jface.text_" };
+            "org.eclipse.ltk.core.refactoring_", "org.eclipse.text_", "org.eclipse.jface.text_",
+            "org.eclipse.ui.workbench.texteditor_", "org.eclipse.ui.editors_",
+            "org.eclipse.core.filebuffers_" };
         
         List<String> found = new ArrayList<>();
         try (Stream<Path> stream = Files.list(plugins)) {

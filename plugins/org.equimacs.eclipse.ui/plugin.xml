@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+   <extension point="org.eclipse.ui.views">
+      <view id="org.equimacs.eclipse.ui.reviewView"
+            name="Equimacs Review"
+            class="org.equimacs.eclipse.ui.review.ReviewView"
+            allowMultiple="false"
+            restorable="true"/>
+   </extension>
+
+   <extension point="org.eclipse.core.resources.markers"
+              id="reviewComment"
+              name="Review Comment">
+      <super type="org.eclipse.core.resources.textmarker"/>
+      <persistent value="true"/>
+   </extension>
+
+   <extension point="org.eclipse.ui.editors.annotationTypes">
+      <type name="org.equimacs.eclipse.ui.reviewComment"
+            markerType="org.equimacs.eclipse.ui.reviewComment"
+            markerSeverity="0"/>
+   </extension>
+
+   <extension point="org.eclipse.ui.editors.markerAnnotationSpecification">
+      <specification
+            annotationType="org.equimacs.eclipse.ui.reviewComment"
+            label="Review Comment"
+            colorPreferenceKey="org.equimacs.eclipse.ui.reviewComment.color"
+            colorPreferenceValue="100,180,255"
+            textStylePreferenceKey="org.equimacs.eclipse.ui.reviewComment.textStyle"
+            textStylePreferenceValue="HIGHLIGHT"
+            highlightPreferenceKey="org.equimacs.eclipse.ui.reviewComment.highlight"
+            highlightPreferenceValue="true"
+            verticalRulerPreferenceKey="org.equimacs.eclipse.ui.reviewComment.verticalRuler"
+            verticalRulerPreferenceValue="true"
+            overviewRulerPreferenceKey="org.equimacs.eclipse.ui.reviewComment.overviewRuler"
+            overviewRulerPreferenceValue="true"
+            isGoToNextNavigationTarget="false"
+            isGoToPreviousNavigationTarget="false"
+            showInNextPrevDropdownToolbarAction="false"/>
+   </extension>
+
+   <extension point="org.eclipse.ui.commands">
+      <command id="org.equimacs.eclipse.ui.addReviewComment"
+               name="Add Review Comment"
+               description="Post a review comment at the current cursor line"/>
+   </extension>
+
+   <extension point="org.eclipse.ui.handlers">
+      <handler commandId="org.equimacs.eclipse.ui.addReviewComment"
+               class="org.equimacs.eclipse.ui.review.AddReviewCommentHandler">
+         <activeWhen>
+            <with variable="activeEditor">
+               <instanceof value="org.eclipse.ui.texteditor.ITextEditor"/>
+            </with>
+         </activeWhen>
+      </handler>
+   </extension>
+
+   <extension point="org.eclipse.ui.bindings">
+      <key sequence="M1+M3+C"
+           commandId="org.equimacs.eclipse.ui.addReviewComment"
+           schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"/>
+   </extension>
+
+   <extension point="org.eclipse.ui.menus">
+      <menuContribution locationURI="popup:org.eclipse.ui.popup.any?after=additions">
+         <command commandId="org.equimacs.eclipse.ui.addReviewComment"
+                  label="Add Review Comment"
+                  style="push">
+            <visibleWhen checkEnabled="false">
+               <with variable="activeEditor">
+                  <instanceof value="org.eclipse.ui.texteditor.ITextEditor"/>
+               </with>
+            </visibleWhen>
+         </command>
+      </menuContribution>
+   </extension>
+</plugin>

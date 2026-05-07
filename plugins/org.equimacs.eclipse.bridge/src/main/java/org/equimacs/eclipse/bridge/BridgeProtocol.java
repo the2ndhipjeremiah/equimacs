@@ -52,6 +52,14 @@ final class BridgeProtocol {
             case "ListLaunches" -> Request.ListLaunches.class;
             case "ListSessions" -> Request.ListSessions.class;
             case "Terminate" -> Request.Terminate.class;
+            case "AddReviewComment" -> Request.AddReviewComment.class;
+            case "ListReviewComments" -> Request.ListReviewComments.class;
+            case "ReplyToComment" -> Request.ReplyToComment.class;
+            case "ResolveComment" -> Request.ResolveComment.class;
+            case "ReviewDiagnostics" -> Request.ReviewDiagnostics.class;
+            case "EclipseWorkbench" -> Request.EclipseWorkbench.class;
+            case "EclipseEditorDiagnostics" -> Request.EclipseEditorDiagnostics.class;
+            case "ReviewEditorDiagnostics" -> Request.ReviewEditorDiagnostics.class;
             case "Shutdown" -> Request.Shutdown.class;
             default -> throw new JsonParseException("Unknown request type: " + type);
         };
