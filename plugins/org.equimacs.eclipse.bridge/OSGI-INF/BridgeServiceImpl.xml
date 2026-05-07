@@ -12,6 +12,7 @@
               interface="org.equimacs.eclipse.bridge.api.IBridgeCommandHandler"
               cardinality="0..n"
               policy="dynamic"
+              policy-option="greedy"
               bind="addHandler"
               unbind="removeHandler"/>
 </scr:component>

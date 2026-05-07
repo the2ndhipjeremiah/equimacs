@@ -61,6 +61,7 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
         store.setValue(p + ".highlight", true);
         store.setValue(p + ".verticalRuler", true);
         store.setValue(p + ".overviewRuler", true);
+        store.setValue(p + ".text", true);
         store.setValue(p + ".textStyle", "HIGHLIGHT");
         store.setValue(p + ".color", "100,180,255");
     }
@@ -109,6 +110,7 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
         prefValues.put("highlight", prefs.getBoolean(p + ".highlight"));
         prefValues.put("verticalRuler", prefs.getBoolean(p + ".verticalRuler"));
         prefValues.put("overviewRuler", prefs.getBoolean(p + ".overviewRuler"));
+        prefValues.put("text", prefs.getBoolean(p + ".text"));
         prefValues.put("textStyle", prefs.getString(p + ".textStyle"));
         prefValues.put("color", prefs.getString(p + ".color"));
 

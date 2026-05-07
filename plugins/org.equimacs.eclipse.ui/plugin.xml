@@ -26,8 +26,11 @@
       <specification
             annotationType="org.equimacs.eclipse.ui.reviewComment"
             label="Review Comment"
+            icon="$nl$/icons/review-comment.svg"
             colorPreferenceKey="org.equimacs.eclipse.ui.reviewComment.color"
             colorPreferenceValue="100,180,255"
+            textPreferenceKey="org.equimacs.eclipse.ui.reviewComment.text"
+            textPreferenceValue="true"
             textStylePreferenceKey="org.equimacs.eclipse.ui.reviewComment.textStyle"
             textStylePreferenceValue="HIGHLIGHT"
             highlightPreferenceKey="org.equimacs.eclipse.ui.reviewComment.highlight"

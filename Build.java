@@ -181,6 +181,7 @@ public class Build {
         copyDir(classes, staging);
         Files.copy(uiDir.resolve("plugin.xml"), staging.resolve("plugin.xml"), StandardCopyOption.REPLACE_EXISTING);
         copyOsgiInf(uiDir, staging);
+        copyOptionalDir(uiDir, staging, "icons");
 
         Files.deleteIfExists(jarOut);
         runProcess(List.of(getJar(), "--create",
@@ -271,6 +272,13 @@ public class Build {
         Path osgiInf = bundleDir.resolve("OSGI-INF");
         if (Files.exists(osgiInf)) {
             copyDir(osgiInf, staging.resolve("OSGI-INF"));
+        }
+    }
+
+    private static void copyOptionalDir(Path bundleDir, Path staging, String name) throws IOException {
+        Path source = bundleDir.resolve(name);
+        if (Files.exists(source)) {
+            copyDir(source, staging.resolve(name));
         }
     }
 
