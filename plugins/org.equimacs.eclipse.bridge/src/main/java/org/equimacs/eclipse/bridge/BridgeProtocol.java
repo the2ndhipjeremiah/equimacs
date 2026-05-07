@@ -32,6 +32,7 @@ final class BridgeProtocol {
             case "Step" -> Request.Step.class;
             case "GogoExec" -> Request.GogoExec.class;
             case "Reload" -> Request.Reload.class;
+            case "HandlerDiagnostics" -> Request.HandlerDiagnostics.class;
             case "GetWorkspace" -> Request.GetWorkspace.class;
             case "GetThreads" -> Request.GetThreads.class;
             case "GetStack" -> Request.GetStack.class;

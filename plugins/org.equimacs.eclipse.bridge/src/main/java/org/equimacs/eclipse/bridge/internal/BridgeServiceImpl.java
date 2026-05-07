@@ -12,9 +12,12 @@ import java.nio.file.Path;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -31,6 +34,7 @@ import org.equimacs.protocol.Request;
 import org.equimacs.protocol.Response;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
+import org.osgi.framework.FrameworkUtil;
 import org.osgi.framework.ServiceReference;
 import org.osgi.framework.wiring.FrameworkWiring;
 
@@ -95,7 +99,10 @@ public final class BridgeServiceImpl implements IBridgeService {
     }
 
     private static String[] handledTypes(Map<String, Object> props) {
-        Object val = props.get("equimacs.commands");
+        return handledTypesFromValue(props.get("equimacs.commands"));
+    }
+
+    private static String[] handledTypesFromValue(Object val) {
         String[] raw;
         if (val instanceof String[] arr) {
             raw = arr;
@@ -126,6 +133,7 @@ public final class BridgeServiceImpl implements IBridgeService {
             case Request.WaitEvent w -> waitEvent(w.timeoutMs());
             case Request.Reload _ -> reloadBundle();
             case Request.GogoExec g -> executeGogo(g.command());
+            case Request.HandlerDiagnostics _ -> handlerDiagnostics();
             default -> {
                 String typeName = req.getClass().getSimpleName();
                 IBridgeCommandHandler handler = dispatchMap.get(typeName);
@@ -227,6 +235,115 @@ public final class BridgeServiceImpl implements IBridgeService {
         } finally {
             c.ungetService(ref);
         }
+    }
+
+    private Map<String, Object> handlerDiagnostics() {
+        BundleContext c = requireBundleContext();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("handlerCount", distinctHandlerCount());
+        result.put("commandCount", dispatchMap.size());
+        result.put("commands", commandDiagnostics());
+        result.put("services", handlerServiceDiagnostics(c));
+        result.put("intrinsicRequests", intrinsicRequests());
+        result.put("optionalRequests", optionalRequests());
+        result.put("missingKnownRequests", missingKnownRequests());
+        return result;
+    }
+
+    private int distinctHandlerCount() {
+        return (int) dispatchMap.values().stream().distinct().count();
+    }
+
+    private Map<String, Object> commandDiagnostics() {
+        Map<String, Object> commands = new TreeMap<>();
+        for (Map.Entry<String, IBridgeCommandHandler> entry : dispatchMap.entrySet()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            IBridgeCommandHandler handler = entry.getValue();
+            item.put("handlerClass", handler.getClass().getName());
+            Bundle bundle = FrameworkUtil.getBundle(handler.getClass());
+            addBundleFields(item, bundle);
+            commands.put(entry.getKey(), item);
+        }
+        return commands;
+    }
+
+    private List<Map<String, Object>> handlerServiceDiagnostics(BundleContext c) {
+        try {
+            Collection<ServiceReference<IBridgeCommandHandler>> refs =
+                c.getServiceReferences(IBridgeCommandHandler.class, null);
+            List<ServiceReference<IBridgeCommandHandler>> sorted = new ArrayList<>(refs);
+            sorted.sort(Comparator.comparingLong(ref -> serviceId(ref)));
+            List<Map<String, Object>> services = new ArrayList<>();
+            for (ServiceReference<IBridgeCommandHandler> ref : sorted) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                IBridgeCommandHandler handler = c.getService(ref);
+                try {
+                    item.put("serviceId", serviceId(ref));
+                    item.put("handlerClass", handler == null ? null : handler.getClass().getName());
+                    item.put("commands", List.of(handledTypesFromValue(ref.getProperty("equimacs.commands"))));
+                    Bundle bundle = ref.getBundle();
+                    addBundleFields(item, bundle);
+                    item.put("usedByBridge", handler != null && dispatchMap.containsValue(handler));
+                } finally {
+                    if (handler != null) c.ungetService(ref);
+                }
+                services.add(item);
+            }
+            return services;
+        } catch (Exception e) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("error", e.getMessage());
+            return List.of(item);
+        }
+    }
+
+    private static long serviceId(ServiceReference<?> ref) {
+        Object id = ref.getProperty("service.id");
+        return id instanceof Number n ? n.longValue() : -1;
+    }
+
+    private static void addBundleFields(Map<String, Object> item, Bundle bundle) {
+        item.put("bundleId", bundle == null ? null : bundle.getBundleId());
+        item.put("bundle", bundle == null ? null : bundle.getSymbolicName());
+        item.put("bundleState", bundle == null ? null : bundleStateName(bundle.getState()));
+    }
+
+    private static String bundleStateName(int state) {
+        return switch (state) {
+            case Bundle.UNINSTALLED -> "Uninstalled";
+            case Bundle.INSTALLED -> "Installed";
+            case Bundle.RESOLVED -> "Resolved";
+            case Bundle.STARTING -> "Starting";
+            case Bundle.STOPPING -> "Stopping";
+            case Bundle.ACTIVE -> "Active";
+            default -> "Unknown(" + state + ")";
+        };
+    }
+
+    private static List<String> intrinsicRequests() {
+        return List.of(
+            Request.WaitEvent.class.getSimpleName(),
+            Request.Reload.class.getSimpleName(),
+            Request.GogoExec.class.getSimpleName(),
+            Request.HandlerDiagnostics.class.getSimpleName());
+    }
+
+    private static List<String> optionalRequests() {
+        return List.of(Request.Shutdown.class.getSimpleName());
+    }
+
+    private List<String> missingKnownRequests() {
+        List<String> missing = new ArrayList<>();
+        List<String> intrinsic = intrinsicRequests();
+        List<String> optional = optionalRequests();
+        for (Class<?> permitted : Request.class.getPermittedSubclasses()) {
+            String name = permitted.getSimpleName();
+            if (!intrinsic.contains(name) && !optional.contains(name) && !dispatchMap.containsKey(name)) {
+                missing.add(name);
+            }
+        }
+        missing.sort(String::compareTo);
+        return missing;
     }
 
     private static boolean looksLikeRawRef(Object o) {

@@ -21,6 +21,7 @@ public sealed interface Request {
     // --- Shell ---
     record GogoExec(String command) implements Request {}
     record Reload() implements Request {}
+    record HandlerDiagnostics() implements Request {}
 
     // --- Inspection ---
     record GetWorkspace() implements Request {}

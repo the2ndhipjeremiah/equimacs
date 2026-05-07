@@ -75,6 +75,7 @@ public class EquimacsCLI {
                     yield new Request.GogoExec(String.join(" ", args.subList(1, args.size())));
                 }
                 case "reload" -> new Request.Reload();
+                case "handlers" -> new Request.HandlerDiagnostics();
                 case "workspace" -> new Request.GetWorkspace();
                 case "problems" -> new Request.GetProblems(
                     args.size() > 1 ? args.get(1) : null,

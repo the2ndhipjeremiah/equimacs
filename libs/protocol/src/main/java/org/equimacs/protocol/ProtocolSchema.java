@@ -58,6 +58,11 @@ public class ProtocolSchema {
             "command": { "type": "string", "description": "The Gogo shell command line to execute" }
           }
         },
+        "handlers": {
+          "description": "Inspect bridge command handler dispatch and OSGi service binding state",
+          "record": "HandlerDiagnostics",
+          "params": {}
+        },
         "threads": {
           "description": "List all active threads in the debug session",
           "record": "GetThreads",
