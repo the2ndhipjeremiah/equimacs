@@ -29,6 +29,7 @@ eqm-cli stack <threadId>
 eqm-cli vars <frameId>
 eqm-cli reload
 eqm-cli gogo <command...>
+eqm-cli handlers
 eqm-cli workspace
 eqm-cli problems [project] [-s error|warning|info|all]
 eqm-cli build [project] [-k full|incremental|clean|auto]
@@ -44,6 +45,16 @@ eqm-cli applyfix <file>:<line> <index>
 eqm-cli wait-event [--timeout <ms>]
 eqm-cli launch <config-name>
 eqm-cli list-launches
+eqm-cli sessions
+eqm-cli terminate
+eqm-cli review-add <file>:<line> <text...> [--author <name>]
+eqm-cli review-list [file]
+eqm-cli review-reply <commentId> <text...> [--author <name>]
+eqm-cli review-resolve <commentId>
+eqm-cli review-diagnostics [file]
+eqm-cli eclipse-workbench
+eqm-cli eclipse-editor-diagnostics
+eqm-cli review-editor-diagnostics [file[:line]]
 eqm-cli shutdown
 eqm-cli --schema
 ```
@@ -137,6 +148,25 @@ Maintenance rules:
 After building and deploying the plugin into `dropins/`, the bridge starts automatically when Eclipse loads the bundle.
 
 Use `Equimacs Bridge > Start Listening` only if you have stopped it and want to bring the socket back manually.
+
+The IDE build also includes `org.equimacs.eclipse.ui`, which contributes the
+Equimacs Review view, right-click/keybinding support for adding review
+comments, and editor annotations for unresolved review threads. Review comments
+are persisted in the workspace under `.equimacs-review/` and render as Eclipse
+markers with hover text, a ruler icon, and a line highlight.
+
+Useful diagnostics:
+
+```powershell
+eqm-cli handlers
+eqm-cli review-diagnostics /myproject/src/myproject/Main.java
+eqm-cli eclipse-editor-diagnostics
+eqm-cli review-editor-diagnostics /myproject/src/myproject/Main.java:42
+```
+
+`handlers` is bridge-native and reports which OSGi command handler owns each
+request type. It should show both `org.equimacs.debug` and
+`org.equimacs.eclipse.ui` handlers as `usedByBridge: true` in the IDE.
 
 ## Headless Daemon
 
