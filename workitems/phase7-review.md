@@ -63,7 +63,7 @@ Fix applied: `ReviewCommandHandler.activate()` calls `EditorsUI.getPreferenceSto
 ### Next Debug Steps
 1. Restart Eclipse after UI bundle changes, then verify handler/diagnostics:
    ```bash
-   eqm-cli review-diagnostics /myproject/src/myproject/Main.java
+   eqm-cli review-diagnostics /<project>/src/<package>/Main.java
    ```
 2. Confirm diagnostics reports `charStart >= 0`, `charEnd > charStart`, and annotation preferences `highlight=true`, `textStyle=HIGHLIGHT`.
 3. If char range IS set and preferences ARE enabled but still no highlight: the `ITextFileBufferManager` call may need to run on the UI thread. Consider wrapping in `Display.syncExec()` from `AddReviewCommentHandler` (which already runs on UI thread and has the document).
@@ -153,7 +153,7 @@ Expected:
 ### 2. Review Store / Marker / Annotation Preferences
 Inspect stored comments, workspace markers, char ranges, and annotation prefs:
 ```bash
-eqm-cli review-diagnostics /myproject/src/myproject/Main.java
+eqm-cli review-diagnostics /<project>/src/<package>/Main.java
 ```
 
 Expected:
@@ -181,7 +181,7 @@ eqm-cli review-editor-diagnostics
 ```
 
 Expected:
-- The active editor is `/myproject/src/myproject/Main.java`.
+- The active editor is `/<project>/src/<package>/Main.java`.
 - The marker annotation model contains the review marker annotation.
 - The annotation position has non-zero length and matches the marker char range.
 
