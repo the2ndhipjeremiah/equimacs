@@ -11,6 +11,89 @@ Equimacs is a local bridge between Eclipse and external tools. It consists of:
 
 The current implementation is centered on Java debugging and Eclipse workspace automation. CDT support is not implemented yet.
 
+## Install
+
+Prerequisites:
+
+- JDK 26
+- Eclipse with RCP and JDT installed
+- A local clone of this repository
+
+Create a local `.env` from the example and point it at your Eclipse and JDK
+installations:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```text
+ECLIPSE_HOME=<eclipse-home>
+JAVA_HOME=<jdk-home>
+```
+
+Build and deploy Equimacs:
+
+```powershell
+java Build.java
+```
+
+```bash
+java Build.java
+```
+
+The build compiles the bundles and CLI tools, then deploys the Eclipse bundles
+into `<eclipse-home>/dropins/`. Restart Eclipse after the first deploy so the
+dropins reconciler can load the bundles.
+
+Add the packaged CLI directories to your shell `PATH`, or call the tools by
+their full paths:
+
+```powershell
+$env:PATH = "$PWD\tools\cli\build\app\eqm-cli;$PWD\tools\mgr\build\app\eqm-mgr;$env:PATH"
+```
+
+```bash
+export PATH="$PWD/tools/cli/build/app/eqm-cli:$PWD/tools/mgr/build/app/eqm-mgr:$PATH"
+```
+
+Verify the IDE bridge after Eclipse starts:
+
+```powershell
+eqm-cli handlers
+```
+
+```bash
+eqm-cli handlers
+```
+
+To run without the Eclipse UI, start the headless daemon:
+
+```powershell
+tools\eqmd\eqmd.cmd
+```
+
+```bash
+tools/eqmd/eqmd
+```
+
+In another shell, point `eqm-cli` at the daemon socket:
+
+```powershell
+$env:EQUIMACS_SOCKET="$env:USERPROFILE\.equimacs-headless\equimacs.sock"
+eqm-cli handlers
+```
+
+```bash
+export EQUIMACS_SOCKET="$HOME/.equimacs-headless/equimacs.sock"
+eqm-cli handlers
+```
+
 ## `eqm-cli`
 
 `eqm-cli` sends one request to the running bridge and prints one JSON response.
