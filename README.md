@@ -159,9 +159,9 @@ Useful diagnostics:
 
 ```powershell
 eqm-cli handlers
-eqm-cli review-diagnostics /<project>/src/<package>/Main.java
+eqm-cli review-diagnostics /myproject/src/myproject/Main.java
 eqm-cli eclipse-editor-diagnostics
-eqm-cli review-editor-diagnostics /<project>/src/<package>/Main.java:42
+eqm-cli review-editor-diagnostics /myproject/src/myproject/Main.java:42
 ```
 
 `handlers` is bridge-native and reports which OSGi command handler owns each
