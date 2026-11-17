@@ -15,25 +15,39 @@ import java.util.Map;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.Path;
+import org.eclipse.jface.action.Action;
+import org.eclipse.jface.action.MenuManager;
+import org.eclipse.jface.action.Separator;
+import org.eclipse.jface.resource.JFaceResources;
 import org.eclipse.jface.text.IDocument;
+import org.eclipse.jface.viewers.DelegatingStyledCellLabelProvider;
+import org.eclipse.jface.viewers.DelegatingStyledCellLabelProvider.IStyledLabelProvider;
 import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.jface.viewers.ITreeContentProvider;
 import org.eclipse.jface.viewers.LabelProvider;
 import org.eclipse.jface.viewers.StructuredSelection;
+import org.eclipse.jface.viewers.StyledString;
 import org.eclipse.jface.viewers.TreeViewer;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.SashForm;
+import org.eclipse.swt.custom.StyleRange;
 import org.eclipse.swt.custom.StyledText;
+import org.eclipse.swt.dnd.Clipboard;
+import org.eclipse.swt.dnd.TextTransfer;
+import org.eclipse.swt.dnd.Transfer;
 import org.eclipse.swt.events.SelectionAdapter;
 import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Label;
+import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.IEditorPart;
+import org.eclipse.ui.ISharedImages;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.ide.IDE;
@@ -58,6 +72,7 @@ public class ReviewView extends ViewPart {
     private Label detailHeaderLabel;
     private Button jumpButton;
     private Button resolveButton;
+    private StyledText codeSnippetText;
     private StyledText transcriptText;
     private Text replyInput;
     private Button replyButton;
@@ -83,7 +98,7 @@ public class ReviewView extends ViewPart {
 
         createTreePane(sash);
         createDetailPane(sash);
-        sash.setWeights(55, 45);
+        sash.setWeights(52, 48);
 
         reload(null);
     }
@@ -118,7 +133,7 @@ public class ReviewView extends ViewPart {
     private void createTreePane(Composite parent) {
         viewer = new TreeViewer(parent, SWT.SINGLE | SWT.BORDER | SWT.H_SCROLL | SWT.V_SCROLL);
         viewer.setContentProvider(new ContentProvider());
-        viewer.setLabelProvider(new ReviewLabelProvider());
+        viewer.setLabelProvider(new DelegatingStyledCellLabelProvider(new ReviewLabelProvider()));
 
         viewer.addSelectionChangedListener(event -> {
             ReviewComment comment = getSelectedComment();
@@ -136,6 +151,53 @@ public class ReviewView extends ViewPart {
                 viewer.setExpandedState(group, !expanded);
             }
         });
+
+        createContextMenu();
+    }
+
+    private void createContextMenu() {
+        MenuManager menuMgr = new MenuManager("#PopupMenu");
+        menuMgr.setRemoveAllWhenShown(true);
+        menuMgr.addMenuListener(manager -> {
+            ReviewComment selected = getSelectedComment();
+            if (selected != null) {
+                Action jumpAction = new Action("Jump to Line") {
+                    @Override
+                    public void run() {
+                        openEditor(selected.file(), selected.line());
+                    }
+                };
+                manager.add(jumpAction);
+
+                Action resolveAction = new Action(selected.resolved() ? "Reopen Thread" : "Resolve Thread") {
+                    @Override
+                    public void run() {
+                        toggleResolveSelected();
+                    }
+                };
+                manager.add(resolveAction);
+
+                Action copyIdAction = new Action("Copy Thread ID") {
+                    @Override
+                    public void run() {
+                        copyToClipboard(selected.id());
+                    }
+                };
+                manager.add(copyIdAction);
+                manager.add(new Separator());
+            }
+
+            Action refreshAction = new Action("Refresh") {
+                @Override
+                public void run() {
+                    reload(selectedCommentId);
+                }
+            };
+            manager.add(refreshAction);
+        });
+
+        Menu menu = menuMgr.createContextMenu(viewer.getControl());
+        viewer.getControl().setMenu(menu);
     }
 
     private void createDetailPane(Composite parent) {
@@ -176,6 +238,12 @@ public class ReviewView extends ViewPart {
                 toggleResolveSelected();
             }
         });
+
+        codeSnippetText = new StyledText(detail, SWT.READ_ONLY | SWT.MULTI | SWT.H_SCROLL | SWT.V_SCROLL | SWT.BORDER);
+        codeSnippetText.setFont(JFaceResources.getTextFont());
+        GridData codeData = new GridData(SWT.FILL, SWT.FILL, true, false);
+        codeData.heightHint = 92;
+        codeSnippetText.setLayoutData(codeData);
 
         transcriptText = new StyledText(detail, SWT.READ_ONLY | SWT.MULTI | SWT.WRAP | SWT.V_SCROLL | SWT.BORDER);
         transcriptText.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
@@ -274,7 +342,11 @@ public class ReviewView extends ViewPart {
         viewer.expandAll();
 
         ReviewComment target = findCommentInGroups(groups, preserveCommentId);
+        if (target == null && !groups.isEmpty() && !groups.get(0).comments().isEmpty()) {
+            target = groups.get(0).comments().get(0);
+        }
         if (target != null) {
+            selectedCommentId = target.id();
             viewer.setSelection(new StructuredSelection(target), true);
         } else {
             selectedCommentId = null;
@@ -331,6 +403,7 @@ public class ReviewView extends ViewPart {
         if (!hasSelection) {
             detailHeaderLabel.setText("Select a review thread");
             resolveButton.setText("Resolve");
+            codeSnippetText.setText("");
             transcriptText.setText("");
             return;
         }
@@ -339,21 +412,68 @@ public class ReviewView extends ViewPart {
         detailHeaderLabel.setText(comment.file() + ":" + comment.line() + "  " + status);
         resolveButton.setText(comment.resolved() ? "Reopen" : "Resolve");
 
-        StringBuilder sb = new StringBuilder();
-        String snippet = readCodeSnippet(comment.file(), comment.line());
-        if (!snippet.isEmpty()) {
-            sb.append("--- Code ---\n").append(snippet).append("\n");
-        }
-        sb.append("--- Thread ---\n");
-        sb.append(comment.author()).append(" (").append(formatTime(comment.timestamp())).append("):\n");
-        sb.append(comment.text()).append("\n");
-        for (ReviewComment.Reply reply : comment.replies()) {
-            sb.append("\n  ↳ ").append(reply.author())
-                .append(" (").append(formatTime(reply.timestamp())).append("):\n");
-            sb.append("    ").append(reply.text()).append("\n");
-        }
-        transcriptText.setText(sb.toString());
+        renderCodeSnippet(comment.file(), comment.line());
+        renderTranscript(comment);
         detailHeaderLabel.getParent().layout(true);
+    }
+
+    private void renderCodeSnippet(String file, int targetLine) {
+        SnippetResult snippet = readCodeSnippet(file, targetLine);
+        codeSnippetText.setText(snippet.text());
+        if (snippet.highlightStart() >= 0 && snippet.highlightLength() > 0) {
+            Display display = codeSnippetText.getDisplay();
+            StyleRange range = new StyleRange();
+            range.start = snippet.highlightStart();
+            range.length = snippet.highlightLength();
+            range.background = display.getSystemColor(SWT.COLOR_INFO_BACKGROUND);
+            range.fontStyle = SWT.BOLD;
+            codeSnippetText.setStyleRange(range);
+        }
+    }
+
+    private void renderTranscript(ReviewComment comment) {
+        StringBuilder sb = new StringBuilder();
+        List<StyleRange> styles = new ArrayList<>();
+        Display display = transcriptText.getDisplay();
+
+        appendMessage(sb, styles, display, comment.author(), comment.timestamp(), comment.text(), false);
+        for (ReviewComment.Reply reply : comment.replies()) {
+            sb.append("\n");
+            appendMessage(sb, styles, display, reply.author(), reply.timestamp(), reply.text(), true);
+        }
+
+        transcriptText.setText(sb.toString());
+        transcriptText.setStyleRanges(styles.toArray(new StyleRange[0]));
+    }
+
+    private static void appendMessage(
+            StringBuilder sb,
+            List<StyleRange> styles,
+            Display display,
+            String author,
+            long timestamp,
+            String body,
+            boolean isReply) {
+        String prefix = isReply ? "  \u21b3 " : "";
+        int authorStart = sb.length() + prefix.length();
+        sb.append(prefix).append(author);
+        StyleRange authorStyle = new StyleRange();
+        authorStyle.start = authorStart;
+        authorStyle.length = author.length();
+        authorStyle.fontStyle = SWT.BOLD;
+        styles.add(authorStyle);
+
+        String timePart = " (" + formatTime(timestamp) + "):\n";
+        int timeStart = sb.length();
+        sb.append(timePart);
+        StyleRange timeStyle = new StyleRange();
+        timeStyle.start = timeStart;
+        timeStyle.length = timePart.length();
+        timeStyle.foreground = display.getSystemColor(SWT.COLOR_DARK_GRAY);
+        styles.add(timeStyle);
+
+        String indent = isReply ? "    " : "";
+        sb.append(indent).append(body).append("\n");
     }
 
     private void submitReply() {
@@ -389,15 +509,26 @@ public class ReviewView extends ViewPart {
         }
     }
 
+    private void copyToClipboard(String text) {
+        Clipboard clipboard = new Clipboard(viewer.getControl().getDisplay());
+        try {
+            clipboard.setContents(new Object[] { text }, new Transfer[] { TextTransfer.getInstance() });
+        } finally {
+            clipboard.dispose();
+        }
+    }
+
     private static String formatTime(long epochMillis) {
         return TIME_FMT.format(Instant.ofEpochMilli(epochMillis));
     }
 
-    private static String readCodeSnippet(String file, int targetLine) {
-        if (targetLine <= 0) return "";
+    private record SnippetResult(String text, int highlightStart, int highlightLength) {}
+
+    private static SnippetResult readCodeSnippet(String file, int targetLine) {
+        if (targetLine <= 0) return new SnippetResult("", -1, 0);
         try {
             IFile iFile = ResourcesPlugin.getWorkspace().getRoot().getFile(new Path(file));
-            if (!iFile.exists()) return "";
+            if (!iFile.exists()) return new SnippetResult("", -1, 0);
             List<String> lines = new ArrayList<>();
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(iFile.getContents(), StandardCharsets.UTF_8))) {
@@ -409,13 +540,20 @@ public class ReviewView extends ViewPart {
             int start = Math.max(1, targetLine - 2);
             int end = Math.min(lines.size(), targetLine + 2);
             StringBuilder sb = new StringBuilder();
+            int highlightStart = -1;
+            int highlightLength = 0;
             for (int n = start; n <= end; n++) {
                 String marker = n == targetLine ? ">" : " ";
-                sb.append(String.format("%s %4d | %s%n", marker, n, lines.get(n - 1)));
+                String formatted = String.format("%s %4d | %s%n", marker, n, lines.get(n - 1));
+                if (n == targetLine) {
+                    highlightStart = sb.length();
+                    highlightLength = formatted.length();
+                }
+                sb.append(formatted);
             }
-            return sb.toString();
+            return new SnippetResult(sb.toString(), highlightStart, highlightLength);
         } catch (Exception e) {
-            return "";
+            return new SnippetResult("", -1, 0);
         }
     }
 
@@ -471,21 +609,47 @@ public class ReviewView extends ViewPart {
         }
     }
 
-    private static class ReviewLabelProvider extends LabelProvider {
+    private static class ReviewLabelProvider extends LabelProvider implements IStyledLabelProvider {
         @Override
-        public String getText(Object element) {
+        public Image getImage(Object element) {
+            if (element instanceof FileGroup) {
+                return PlatformUI.getWorkbench().getSharedImages().getImage(ISharedImages.IMG_OBJ_FILE);
+            }
+            return null;
+        }
+
+        @Override
+        public StyledString getStyledText(Object element) {
             return switch (element) {
                 case FileGroup g -> {
                     long open = g.comments().stream().filter(c -> !c.resolved()).count();
-                    yield g.file() + " (" + open + " open / " + g.comments().size() + ")";
+                    StyledString ss = new StyledString(g.file());
+                    ss.append(" (" + open + " open / " + g.comments().size() + ")", StyledString.COUNTER_STYLER);
+                    yield ss;
                 }
                 case ReviewComment c -> {
-                    String status = c.resolved() ? "[RESOLVED]" : "[OPEN]";
-                    String replies = c.replies().isEmpty() ? "" : " (" + c.replies().size() + " replies)";
-                    yield "L" + c.line() + " " + status + " " + c.author() + ": " + c.text() + replies;
+                    StyledString ss = new StyledString();
+                    ss.append("L" + c.line() + " ", StyledString.QUALIFIER_STYLER);
+                    if (c.resolved()) {
+                        ss.append("[RESOLVED] ", StyledString.DECORATIONS_STYLER);
+                    } else {
+                        ss.append("[OPEN] ", StyledString.COUNTER_STYLER);
+                    }
+                    ss.append(c.author() + ": " + c.text());
+                    int count = c.replies().size();
+                    if (count > 0) {
+                        String word = count == 1 ? "reply" : "replies";
+                        ss.append(" (" + count + " " + word + ")", StyledString.COUNTER_STYLER);
+                    }
+                    yield ss;
                 }
-                default -> String.valueOf(element);
+                default -> new StyledString(String.valueOf(element));
             };
+        }
+
+        @Override
+        public String getText(Object element) {
+            return getStyledText(element).getString();
         }
     }
 }
