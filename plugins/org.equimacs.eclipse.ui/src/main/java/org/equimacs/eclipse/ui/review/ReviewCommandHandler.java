@@ -36,6 +36,7 @@ import org.equimacs.protocol.Request;
 public final class ReviewCommandHandler implements IBridgeCommandHandler {
 
     private volatile IBridgeService bridge;
+    private volatile boolean uiInitialized;
     private final ReviewStore store = new ReviewStore();
 
     void setBridge(IBridgeService bridge) {
@@ -47,12 +48,25 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
     }
 
     void activate() {
-        initAnnotationPreferences();
+        ensureUiInitialized();
+    }
+
+    private synchronized void ensureUiInitialized() {
+        if (uiInitialized) {
+            return;
+        }
+        try {
+            initAnnotationPreferences();
+        } catch (IllegalStateException e) {
+            // Workspace instance location is not initialized yet; retry on first request.
+            return;
+        }
         try {
             ReviewMarkerManager.reconcile(store.list(null));
         } catch (Exception e) {
             // Review comments remain available even if decorative markers fail.
         }
+        uiInitialized = true;
     }
 
     private static void initAnnotationPreferences() {
@@ -72,6 +86,7 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
 
     @Override
     public Object handle(Request req) throws Exception {
+        ensureUiInitialized();
         return switch (req) {
             case Request.AddReviewComment r -> {
                 ReviewComment comment = store.addComment(r.file(), r.line(), r.author(), r.text());

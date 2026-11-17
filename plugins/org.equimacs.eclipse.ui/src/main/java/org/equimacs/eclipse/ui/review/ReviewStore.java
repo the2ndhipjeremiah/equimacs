@@ -53,11 +53,15 @@ public class ReviewStore {
     }
 
     public synchronized ReviewComment resolve(String commentId) throws IOException {
+        return setResolved(commentId, true);
+    }
+
+    public synchronized ReviewComment setResolved(String commentId, boolean resolved) throws IOException {
         List<ReviewComment> comments = load();
         for (int i = 0; i < comments.size(); i++) {
             ReviewComment c = comments.get(i);
             if (c.id().equals(commentId)) {
-                ReviewComment updated = c.withResolved(true);
+                ReviewComment updated = c.withResolved(resolved);
                 comments.set(i, updated);
                 save(comments);
                 return updated;
