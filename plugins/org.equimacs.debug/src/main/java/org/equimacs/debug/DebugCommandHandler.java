@@ -7,6 +7,7 @@ import org.equimacs.protocol.Request;
 public final class DebugCommandHandler implements IBridgeCommandHandler {
 
     private volatile JavaDebugController controller;
+    private volatile JUnitTestRunnerService testRunner;
     private final JavaNavigationService navigation = new JavaNavigationService();
     private volatile IBridgeService bridge;
 
@@ -28,6 +29,11 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
         controller = null;
         if (c != null) {
             c.dispose();
+        }
+        JUnitTestRunnerService tr = testRunner;
+        testRunner = null;
+        if (tr != null) {
+            tr.dispose();
         }
     }
 
@@ -88,6 +94,9 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
             case Request.FindReferences f -> navigation.findReferences(f.file(), f.offset());
             case Request.CallHierarchy ch -> navigation.callHierarchy(ch.file(), ch.offset(), ch.direction(), ch.depth());
             case Request.TypeHierarchy th -> navigation.typeHierarchy(th.file(), th.offset());
+            case Request.RunTests rt -> testRunner().runTests(
+                rt.project(), rt.className(), rt.methodName(), rt.mode(), rt.runner(), rt.await(), rt.timeoutMs());
+            case Request.GetTestResults tr -> testRunner().getTestResults(tr.runId(), tr.failuresOnly());
             default -> throw new IllegalArgumentException(
                 "DebugCommandHandler: no handler for " + req.getClass().getSimpleName());
         };
@@ -110,6 +119,26 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
                 controller = c;
             }
             return c;
+        }
+    }
+
+    private JUnitTestRunnerService testRunner() {
+        JUnitTestRunnerService tr = testRunner;
+        if (tr != null) {
+            return tr;
+        }
+        synchronized (this) {
+            tr = testRunner;
+            if (tr == null) {
+                IBridgeService b = bridge;
+                if (b == null) {
+                    throw new IllegalStateException("Bridge service unavailable");
+                }
+                tr = new JUnitTestRunnerService();
+                tr.init(b::publishEvent);
+                testRunner = tr;
+            }
+            return tr;
         }
     }
 }

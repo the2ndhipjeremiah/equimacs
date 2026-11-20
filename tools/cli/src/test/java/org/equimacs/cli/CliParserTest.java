@@ -193,6 +193,51 @@ class CliParserTest {
         assertInstanceOf(Request.ClearTrace.class, parse("trace-clear"));
     }
 
+    @Test
+    void parsesJUnitTestCommands() {
+        Request.RunTests projOnly = assertInstanceOf(
+            Request.RunTests.class, parse("run-tests", "myproject"));
+        assertEquals("myproject", projOnly.project());
+        org.junit.jupiter.api.Assertions.assertNull(projOnly.className());
+        org.junit.jupiter.api.Assertions.assertNull(projOnly.methodName());
+        org.junit.jupiter.api.Assertions.assertNull(projOnly.mode());
+        org.junit.jupiter.api.Assertions.assertNull(projOnly.runner());
+        org.junit.jupiter.api.Assertions.assertNull(projOnly.await());
+        assertEquals(60_000, projOnly.timeoutMs());
+
+        Request.RunTests methodTarget = assertInstanceOf(
+            Request.RunTests.class,
+            parse("run-tests", "myproject", "com.example.MathTest#addsNumbers", "--runner", "junit5", "--timeout", "15000"));
+        assertEquals("myproject", methodTarget.project());
+        assertEquals("com.example.MathTest", methodTarget.className());
+        assertEquals("addsNumbers", methodTarget.methodName());
+        assertEquals("junit5", methodTarget.runner());
+        assertEquals(15_000, methodTarget.timeoutMs());
+
+        Request.RunTests debugNoWait = assertInstanceOf(
+            Request.RunTests.class,
+            parse("run-tests", "myproject", "com.example.MathTest", "--mode", "debug", "--no-wait"));
+        assertEquals("com.example.MathTest", debugNoWait.className());
+        assertEquals("debug", debugNoWait.mode());
+        assertEquals(Boolean.FALSE, debugNoWait.await());
+
+        Request.RunTests waitFalse = assertInstanceOf(
+            Request.RunTests.class,
+            parse("run-tests", "myproject", "--wait", "false"));
+        assertEquals(Boolean.FALSE, waitFalse.await());
+
+        Request.GetTestResults latest = assertInstanceOf(Request.GetTestResults.class, parse("test-results"));
+        org.junit.jupiter.api.Assertions.assertNull(latest.runId());
+        assertEquals(Boolean.FALSE, latest.failuresOnly());
+
+        assertEquals(
+            new Request.GetTestResults("test_3", Boolean.TRUE),
+            parse("test-results", "test_3", "--failures"));
+        assertEquals(
+            new Request.GetTestResults("test_3", Boolean.TRUE),
+            parse("test-results", "--failures-only", "true", "test_3"));
+    }
+
     private static Request parse(String... args) {
         return EquimacsCLI.parseCommand(CliArgs.parse(args));
     }

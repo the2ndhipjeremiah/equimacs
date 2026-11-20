@@ -247,6 +247,27 @@ public class ProtocolSchema {
             "line": { "type": "integer", "optional": true, "description": "1-based start line" },
             "endLine": { "type": "integer", "optional": true, "description": "1-based end line" }
           }
+        },
+        "run-tests": {
+          "description": "Run JUnit tests for a Java project, class, or method",
+          "record": "RunTests",
+          "params": {
+            "project": { "type": "string", "description": "Java project name in workspace" },
+            "className": { "type": "string", "optional": true, "description": "Fully qualified test class name" },
+            "methodName": { "type": "string", "optional": true, "description": "Single test method name (requires className)" },
+            "mode": { "type": "string", "enum": ["run", "debug"], "default": "run", "optional": true },
+            "runner": { "type": "string", "enum": ["junit6", "junit5", "junit4", "junit3"], "optional": true },
+            "await": { "type": "boolean", "optional": true, "description": "Wait for completion (defaults true in run mode, false in debug mode)" },
+            "timeoutMs": { "type": "integer", "optional": true, "default": 60000 }
+          }
+        },
+        "test-results": {
+          "description": "Inspect results and parsed stack frames for a JUnit test run",
+          "record": "GetTestResults",
+          "params": {
+            "runId": { "type": "string", "optional": true, "description": "Test run id (defaults to most recent run)" },
+            "failuresOnly": { "type": "boolean", "optional": true, "default": false }
+          }
         }
       },
       "responses": {
@@ -258,7 +279,8 @@ public class ProtocolSchema {
           "StepCompleted": { "fields": ["threadId"] },
           "ThreadSuspended": { "fields": ["threadId", "reason"] },
           "ThreadResumed": { "fields": ["threadId"] },
-          "ThreadTerminated": { "fields": ["threadId"] }
+          "ThreadTerminated": { "fields": ["threadId"] },
+          "TestRunFinished": { "fields": ["runId", "name", "project", "status", "total", "passed", "failed", "errors", "ignored", "elapsedSeconds"] }
         }
       }
     }

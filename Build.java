@@ -384,7 +384,9 @@ public class Build {
                 "-d", out.toString(),
                 "--release", "26",
                 mainSrc.resolve("LogpointTemplate.java").toString(),
-                mainSrc.resolve("ExecutionTraceStore.java").toString()));
+                mainSrc.resolve("ExecutionTraceStore.java").toString(),
+                mainSrc.resolve("JUnitTraceParser.java").toString(),
+                mainSrc.resolve("JUnitTestStore.java").toString()));
             try (Stream<Path> s = Files.walk(testSrc)) {
                 s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
             }
@@ -685,7 +687,8 @@ public class Build {
     private static String findEclipseJars() throws IOException {
         Path plugins = Path.of(ECLIPSE_HOME, "plugins");
         String[] targets = { "org.eclipse.osgi_", "org.eclipse.ui_", "org.eclipse.core.runtime_", "org.eclipse.debug.core_",
-            "org.eclipse.core.resources_", "org.eclipse.jdt.core_", "org.eclipse.jdt.debug_", "org.eclipse.equinox.common_",
+            "org.eclipse.core.resources_", "org.eclipse.jdt.core_", "org.eclipse.jdt.debug_", "org.eclipse.jdt.junit.core_",
+            "org.eclipse.equinox.common_",
             "org.eclipse.core.commands_", "org.eclipse.jface_", "org.eclipse.ui.workbench_", "org.eclipse.swt_",
             "org.eclipse.core.jobs_", "org.eclipse.equinox.registry_", "org.eclipse.equinox.preferences_",
             "org.eclipse.core.contenttype_", "org.eclipse.swt.win32.win32.x86_64_",

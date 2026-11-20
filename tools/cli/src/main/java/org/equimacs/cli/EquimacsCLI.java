@@ -294,6 +294,67 @@ public class EquimacsCLI {
                     int line = Integer.parseInt(suffix);
                     yield new Request.OpenFile(filePart, line, line);
                 }
+                case "run-tests" -> {
+                    if (args.size() < 2) {
+                        throw new CliParseException(
+                            "Usage: run-tests <project> [class[#method]] [--mode run|debug] [--runner junit5|junit6|junit4|junit3] [--wait true|false] [--no-wait] [--timeout <ms>]");
+                    }
+                    String project = args.get(1);
+                    String className = null;
+                    String methodName = cli.getOption("method", "m");
+                    if (args.size() >= 3) {
+                        String target = args.get(2);
+                        int hash = target.indexOf('#');
+                        if (hash > 0) {
+                            className = target.substring(0, hash);
+                            methodName = target.substring(hash + 1);
+                            if (className.isBlank() || methodName.isBlank()) {
+                                throw new CliParseException("Invalid class#method target: " + target);
+                            }
+                        } else {
+                            className = target;
+                        }
+                    } else {
+                        className = cli.getOption("class");
+                    }
+                    String mode = cli.getOption("mode");
+                    String runner = cli.getOption("runner");
+                    Boolean wait = null;
+                    if (cli.hasFlag("no-wait")) {
+                        wait = Boolean.FALSE;
+                    } else {
+                        String waitOpt = cli.getOption("wait");
+                        if (waitOpt != null) {
+                            if ("true".equalsIgnoreCase(waitOpt)) {
+                                wait = Boolean.TRUE;
+                            } else if ("false".equalsIgnoreCase(waitOpt)) {
+                                wait = Boolean.FALSE;
+                            } else {
+                                throw new CliParseException(
+                                    "Invalid --wait value (expected true or false): " + waitOpt);
+                            }
+                        }
+                    }
+                    String timeoutStr = cli.getOption("timeout", "t");
+                    int timeoutMs = timeoutStr != null ? Integer.parseInt(timeoutStr) : 60_000;
+                    yield new Request.RunTests(project, className, methodName, mode, runner, wait, timeoutMs);
+                }
+                case "test-results" -> {
+                    String runId = args.size() > 1 ? args.get(1) : null;
+                    boolean failuresOnly = cli.hasFlag("failures", "failures-only");
+                    String failuresOpt = cli.getOption("failures-only");
+                    if (failuresOpt != null) {
+                        if ("true".equalsIgnoreCase(failuresOpt)) {
+                            failuresOnly = true;
+                        } else if ("false".equalsIgnoreCase(failuresOpt)) {
+                            failuresOnly = false;
+                        } else {
+                            throw new CliParseException(
+                                "Invalid --failures-only value (expected true or false): " + failuresOpt);
+                        }
+                    }
+                    yield new Request.GetTestResults(runId, failuresOnly);
+                }
                 case "review-add" -> {
                     if (args.size() < 3) throw new CliParseException("Usage: review-add <file>:<line> <text...> [--author <name>]");
                     String spec = args.get(1);

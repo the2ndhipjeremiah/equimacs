@@ -81,6 +81,18 @@ public sealed interface Request {
     record TypeHierarchy(String file, int offset) implements Request {}
     record OpenFile(String file, int line, int endLine) implements Request {}
 
+    // --- Testing (JUnit) ---
+    record RunTests(
+        String project,
+        String className,
+        String methodName,
+        String mode,
+        String runner,
+        Boolean await,
+        int timeoutMs
+    ) implements Request {}
+    record GetTestResults(String runId, Boolean failuresOnly) implements Request {}
+
     /**
      * Types of stepping available.
      */

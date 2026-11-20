@@ -147,6 +147,8 @@ eqm-cli find-refs <file>:<offset>
 eqm-cli call-hierarchy <file>:<offset> [--direction callers|callees] [--depth <n>]
 eqm-cli type-hierarchy <file>:<offset>
 eqm-cli open-file <file>[:<line>[-<endLine>]]
+eqm-cli run-tests <project> [class[#method]] [--mode run|debug] [--runner junit5|junit6|junit4|junit3] [--wait true|false] [--no-wait] [--timeout <ms>]
+eqm-cli test-results [runId] [--failures]
 eqm-cli shutdown
 eqm-cli --schema
 ```
@@ -200,6 +202,14 @@ Third-party OSGi bundles deployed into `<eclipse-home>/dropins/` can register an
 
 ```powershell
 eqm-cli custom my-ext inspect --args '{"scope":"workspace"}'
+```
+
+**5. Headless JUnit execution & failure inspection (`run-tests` / `test-results`)**
+
+```powershell
+eqm-cli run-tests myproject com.example.OrderServiceTest#calculatesDiscount
+eqm-cli test-results --failures          # inspect failed/errored tests + parsed stack frames
+eqm-cli run-tests myproject com.example.OrderServiceTest --mode debug --no-wait
 ```
 
 ## `eqm-mgr`

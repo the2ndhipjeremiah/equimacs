@@ -41,6 +41,8 @@ Terminate
 FindReferences
 CallHierarchy
 TypeHierarchy
+RunTests
+GetTestResults
    </property>
    <reference name="bridge"
               interface="org.equimacs.eclipse.bridge.api.IBridgeService"

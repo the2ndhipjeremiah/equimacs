@@ -71,6 +71,8 @@ final class BridgeProtocol {
             case "CallHierarchy" -> Request.CallHierarchy.class;
             case "TypeHierarchy" -> Request.TypeHierarchy.class;
             case "OpenFile" -> Request.OpenFile.class;
+            case "RunTests" -> Request.RunTests.class;
+            case "GetTestResults" -> Request.GetTestResults.class;
             default -> throw new JsonParseException("Unknown request type: " + type);
         };
     }
