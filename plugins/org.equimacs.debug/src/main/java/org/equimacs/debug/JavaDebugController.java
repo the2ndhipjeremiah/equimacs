@@ -1,15 +1,21 @@
 package org.equimacs.debug;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IMarker;
@@ -35,6 +41,7 @@ import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.Path;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.debug.core.DebugEvent;
+import org.eclipse.debug.core.DebugException;
 import org.eclipse.debug.core.DebugPlugin;
 import org.eclipse.debug.core.IBreakpointManager;
 import org.eclipse.debug.core.IDebugEventSetListener;
@@ -44,17 +51,29 @@ import org.eclipse.debug.core.ILaunchManager;
 import org.eclipse.debug.core.model.IBreakpoint;
 import org.eclipse.debug.core.model.IDebugTarget;
 import org.eclipse.debug.core.model.ILineBreakpoint;
+import org.eclipse.debug.core.model.ISourceLocator;
 import org.eclipse.debug.core.model.IStackFrame;
 import org.eclipse.debug.core.model.IThread;
 import org.eclipse.debug.core.model.IValue;
 import org.eclipse.debug.core.model.IVariable;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IJavaElement;
+import org.eclipse.jdt.core.dom.Message;
+import org.eclipse.jdt.debug.core.IJavaBreakpoint;
+import org.eclipse.jdt.debug.core.IJavaBreakpointListener;
+import org.eclipse.jdt.debug.core.IJavaDebugTarget;
 import org.eclipse.jdt.debug.core.IJavaLineBreakpoint;
 import org.eclipse.jdt.debug.core.IJavaStackFrame;
+import org.eclipse.jdt.debug.core.IJavaThread;
+import org.eclipse.jdt.debug.core.IJavaType;
+import org.eclipse.jdt.debug.core.IJavaValue;
 import org.eclipse.jdt.core.refactoring.IJavaRefactorings;
 import org.eclipse.jdt.core.refactoring.descriptors.RenameJavaElementDescriptor;
 import org.eclipse.jdt.debug.core.JDIDebugModel;
+import org.eclipse.jdt.debug.eval.EvaluationManager;
+import org.eclipse.jdt.debug.eval.IAstEvaluationEngine;
+import org.eclipse.jdt.debug.eval.ICompiledExpression;
+import org.eclipse.jdt.debug.eval.IEvaluationResult;
 import org.eclipse.ltk.core.refactoring.Change;
 import org.eclipse.ltk.core.refactoring.CheckConditionsOperation;
 import org.eclipse.ltk.core.refactoring.CompositeChange;
@@ -74,14 +93,20 @@ import org.eclipse.text.edits.TextEdit;
 
 public class JavaDebugController {
     private static final String PLUGIN_ID = "org.equimacs.debug";
+    private static final String ATTR_LOGPOINT = "org.equimacs.debug.logpoint";
+    private static final String ATTR_LOG_MESSAGE = "org.equimacs.debug.logMessage";
+    private static final String ATTR_LOG_CAPTURE_VARS = "org.equimacs.debug.logCaptureVars";
     private static final NullProgressMonitor NULL_MONITOR = new NullProgressMonitor();
+    private static final Gson GSON = new Gson();
 
     private final Map<Long, IThread> threadRegistry = new ConcurrentHashMap<>();
     private final Map<Long, IStackFrame> frameRegistry = new ConcurrentHashMap<>();
     private final Map<String, PreparedRefactoring> preparedRefactorings = new ConcurrentHashMap<>();
+    private final ExecutionTraceStore traceStore = new ExecutionTraceStore(ExecutionTraceStore.DEFAULT_MAX_ENTRIES);
 
     private volatile Consumer<JsonObject> eventSink;
     private IDebugEventSetListener listener;
+    private IJavaBreakpointListener breakpointListener;
 
     private record PreparedRefactoring(
         String id,
@@ -98,6 +123,9 @@ public class JavaDebugController {
             if (sink == null) return;
             for (DebugEvent event : events) {
                 if (event.getKind() == DebugEvent.SUSPEND && event.getSource() instanceof IThread thread) {
+                    if (event.isEvaluation()) {
+                        continue;
+                    }
                     JsonObject ev = new JsonObject();
                     ev.addProperty("event", event.getDetail() == DebugEvent.BREAKPOINT
                         ? "BreakpointHit" : "StepCompleted");
@@ -122,9 +150,19 @@ public class JavaDebugController {
             }
         };
         DebugPlugin.getDefault().addDebugEventListener(listener);
+        this.breakpointListener = new LogpointBreakpointListener();
+        JDIDebugModel.addJavaBreakpointListener(breakpointListener);
     }
 
     public void dispose() {
+        if (breakpointListener != null) {
+            try {
+                JDIDebugModel.removeJavaBreakpointListener(breakpointListener);
+            } catch (RuntimeException ignored) {
+                // JDIDebugPlugin may already be stopped during shutdown.
+            }
+            breakpointListener = null;
+        }
         if (listener != null) {
             DebugPlugin plugin = DebugPlugin.getDefault();
             if (plugin != null) plugin.removeDebugEventListener(listener);
@@ -133,6 +171,7 @@ public class JavaDebugController {
         eventSink = null;
         threadRegistry.clear();
         frameRegistry.clear();
+        traceStore.clear();
         for (PreparedRefactoring refactoring : preparedRefactorings.values()) {
             refactoring.change().dispose();
         }
@@ -152,19 +191,69 @@ public class JavaDebugController {
         }
     }
 
+    public Map<String, Object> setLogpoint(
+        String filePath,
+        int lineNumber,
+        String message,
+        String condition,
+        Boolean captureVars
+    ) throws CoreException {
+        IResource resource = requireResource(filePath, "Resource not found in workspace: " + filePath);
+        String typeName = resolveJavaTypeName(resource);
+        boolean includeVars = captureVars == null || captureVars;
+        String normalizedMessage = (message != null && !message.isBlank()) ? message : null;
+
+        // JDIDebugModel mutates the attributes map internally, so pass a mutable HashMap.
+        Map<String, Object> attributes = new HashMap<>();
+        attributes.put(ATTR_LOGPOINT, Boolean.TRUE);
+        attributes.put(ATTR_LOG_CAPTURE_VARS, Boolean.valueOf(includeVars));
+        if (normalizedMessage != null) {
+            attributes.put(ATTR_LOG_MESSAGE, normalizedMessage);
+        }
+
+        IJavaLineBreakpoint bp = JDIDebugModel.createLineBreakpoint(
+            resource, typeName, lineNumber, -1, -1, 0, true, attributes);
+        if (condition != null && !condition.isBlank()) {
+            bp.setCondition(condition);
+            bp.setConditionEnabled(true);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("kind", "logpoint");
+        result.put("resource", resource.getFullPath().toString());
+        result.put("line", lineNumber);
+        result.put("typeName", typeName);
+        result.put("captureVars", includeVars);
+        if (normalizedMessage != null) {
+            result.put("message", normalizedMessage);
+        }
+        if (condition != null && !condition.isBlank()) {
+            result.put("condition", condition);
+        }
+        return result;
+    }
+
     public List<Map<String, Object>> listBreakpoints() throws CoreException {
         IBreakpointManager manager = DebugPlugin.getDefault().getBreakpointManager();
         List<Map<String, Object>> result = new ArrayList<>();
         for (IBreakpoint bp : manager.getBreakpoints()) {
             Map<String, Object> info = new HashMap<>();
-            IResource resource = bp.getMarker().getResource();
+            IMarker marker = bp.getMarker();
+            IResource resource = marker.getResource();
             info.put("resource", resource.getFullPath().toString());
             info.put("enabled", bp.isEnabled());
+            boolean logpoint = marker.exists() && marker.getAttribute(ATTR_LOGPOINT, false);
+            info.put("kind", logpoint ? "logpoint" : "breakpoint");
             if (bp instanceof ILineBreakpoint lineBp) info.put("line", lineBp.getLineNumber());
             if (bp instanceof IJavaLineBreakpoint javaBp) {
                 info.put("typeName", javaBp.getTypeName());
                 String cond = javaBp.getCondition();
                 if (cond != null && !cond.isBlank()) info.put("condition", cond);
+            }
+            if (logpoint) {
+                info.put("captureVars", marker.getAttribute(ATTR_LOG_CAPTURE_VARS, true));
+                String msg = marker.getAttribute(ATTR_LOG_MESSAGE, (String) null);
+                if (msg != null && !msg.isBlank()) info.put("message", msg);
             }
             result.add(info);
         }
@@ -174,6 +263,15 @@ public class JavaDebugController {
     public void clearAllBreakpoints() throws CoreException {
         IBreakpointManager manager = DebugPlugin.getDefault().getBreakpointManager();
         manager.removeBreakpoints(manager.getBreakpoints(), true);
+    }
+
+    public Map<String, Object> getTrace(int limit) {
+        return ExecutionTraceStore.toPageMap(traceStore.snapshot(limit));
+    }
+
+    public String clearTrace() {
+        int cleared = traceStore.clear();
+        return "Cleared " + cleared + " trace entry(ies)";
     }
 
     // --- Execution Control ---
@@ -273,6 +371,166 @@ public class JavaDebugController {
             result.add(info);
         }
         return result;
+    }
+
+    public Map<String, Object> evaluate(long frameId, String expression) throws CoreException {
+        if (expression == null || expression.isBlank()) {
+            throw error("Evaluate requires a non-blank expression");
+        }
+        IStackFrame frame = frameRegistry.get(frameId);
+        if (frame == null) {
+            throw error("Frame not found: " + frameId + " — call 'stack' first");
+        }
+        if (!(frame instanceof IJavaStackFrame javaFrame)) {
+            throw error("Frame is not a Java stack frame: " + frameId);
+        }
+        if (!javaFrame.isSuspended()) {
+            throw error("Frame is not suspended: " + frameId);
+        }
+        if (!(javaFrame.getDebugTarget() instanceof IJavaDebugTarget javaTarget)) {
+            throw error("Debug target is not a Java debug target");
+        }
+
+        IJavaProject javaProject = resolveJavaProjectForFrame(javaFrame);
+        if (javaProject == null) {
+            throw error("Could not resolve Java project for stack frame: " + javaFrame.getDeclaringTypeName());
+        }
+
+        IAstEvaluationEngine engine = EvaluationManager.newAstEvaluationEngine(javaProject, javaTarget);
+        try {
+            LogpointTemplate.EvalOutcome outcome = evaluateExpressionOnEngine(engine, javaFrame, expression, 15);
+            return switch (outcome) {
+                case LogpointTemplate.Value v -> {
+                    Map<String, Object> result = new LinkedHashMap<>();
+                    result.put("expression", expression);
+                    result.put("value", v.value());
+                    result.put("type", v.type());
+                    result.put("isNull", v.isNull());
+                    yield result;
+                }
+                case LogpointTemplate.EvalError err -> throw error(err.message());
+            };
+        } finally {
+            engine.dispose();
+        }
+    }
+
+    private LogpointTemplate.EvalOutcome evaluateExpressionOnEngine(
+        IAstEvaluationEngine engine,
+        IJavaStackFrame javaFrame,
+        String expression,
+        long timeoutSeconds
+    ) throws CoreException {
+        ICompiledExpression compiled = engine.getCompiledExpression(expression, javaFrame);
+        if (compiled.hasErrors()) {
+            return new LogpointTemplate.EvalError(
+                "Expression compilation failed: " + String.join("; ", compiled.getErrorMessages()));
+        }
+
+        CompletableFuture<IEvaluationResult> future = new CompletableFuture<>();
+        engine.evaluateExpression(compiled, javaFrame, future::complete, DebugEvent.EVALUATION_IMPLICIT, false);
+
+        IEvaluationResult evalResult;
+        try {
+            evalResult = future.get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            if (javaFrame.getThread() instanceof IJavaThread javaThread && javaThread.canTerminateEvaluation()) {
+                try {
+                    javaThread.terminateEvaluation();
+                } catch (DebugException ignored) {}
+            }
+            return new LogpointTemplate.EvalError(
+                "Evaluation timed out after " + timeoutSeconds + "s: " + expression);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new LogpointTemplate.EvalError("Evaluation interrupted: " + expression);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            return new LogpointTemplate.EvalError(
+                "Evaluation failed: " + (cause != null ? cause.getMessage() : e.getMessage()));
+        }
+
+        if (evalResult.isTerminated()) {
+            return new LogpointTemplate.EvalError("Evaluation terminated before completing: " + expression);
+        }
+        if (evalResult.hasErrors()) {
+            return new LogpointTemplate.EvalError("Evaluation failed: " + formatEvaluationErrors(evalResult));
+        }
+
+        IJavaValue value = evalResult.getValue();
+        if (value == null) {
+            return new LogpointTemplate.Value(null, "void", true);
+        }
+        return new LogpointTemplate.Value(value.getValueString(), value.getReferenceTypeName(), value.isNull());
+    }
+
+    private static String formatEvaluationErrors(IEvaluationResult evalResult) {
+        List<String> parts = new ArrayList<>();
+        String[] messages = evalResult.getErrorMessages();
+        if (messages != null) {
+            for (String msg : messages) {
+                if (msg != null && !msg.isBlank()) {
+                    parts.add(msg);
+                }
+            }
+        }
+        DebugException ex = evalResult.getException();
+        if (ex != null) {
+            String exMsg = ex.getMessage();
+            if (exMsg != null && !exMsg.isBlank() && !parts.contains(exMsg)) {
+                parts.add(exMsg);
+            }
+            if (ex.getStatus() != null && ex.getStatus().getException() != null) {
+                String causeMsg = ex.getStatus().getException().getMessage();
+                if (causeMsg != null && !causeMsg.isBlank() && !parts.contains(causeMsg)) {
+                    parts.add(causeMsg);
+                }
+            }
+        }
+        return parts.isEmpty() ? "unknown error" : String.join("; ", parts);
+    }
+
+    private IJavaProject resolveJavaProjectForFrame(IJavaStackFrame javaFrame) throws CoreException {
+        ILaunch launch = javaFrame.getLaunch();
+        ISourceLocator locator = launch != null ? launch.getSourceLocator() : null;
+        if (locator != null) {
+            Object source = locator.getSourceElement(javaFrame);
+            if (source instanceof IJavaElement javaEl && javaEl.getJavaProject() != null) {
+                return javaEl.getJavaProject();
+            }
+            if (source instanceof IResource res
+                && res.getProject() != null
+                && res.getProject().isOpen()
+                && res.getProject().hasNature(JavaCore.NATURE_ID)) {
+                return JavaCore.create(res.getProject());
+            }
+        }
+
+        if (launch != null && launch.getLaunchConfiguration() != null) {
+            String projectName = launch.getLaunchConfiguration()
+                .getAttribute("org.eclipse.jdt.launching.PROJECT_ATTR", (String) null);
+            if (projectName != null && !projectName.isBlank()) {
+                IProject project = ResourcesPlugin.getWorkspace().getRoot().getProject(projectName);
+                if (project.exists() && project.isOpen() && project.hasNature(JavaCore.NATURE_ID)) {
+                    return JavaCore.create(project);
+                }
+            }
+        }
+
+        IJavaProject firstOpen = null;
+        String declaringType = javaFrame.getDeclaringTypeName();
+        for (IProject project : ResourcesPlugin.getWorkspace().getRoot().getProjects()) {
+            if (project.isOpen() && project.hasNature(JavaCore.NATURE_ID)) {
+                IJavaProject jp = JavaCore.create(project);
+                if (firstOpen == null) {
+                    firstOpen = jp;
+                }
+                if (declaringType != null && !declaringType.isBlank() && jp.findType(declaringType) != null) {
+                    return jp;
+                }
+            }
+        }
+        return firstOpen;
     }
 
     // --- Problems ---
@@ -813,7 +1071,7 @@ public class JavaDebugController {
         ILaunchManager lm = DebugPlugin.getDefault().getLaunchManager();
         for (ILaunchConfiguration cfg : lm.getLaunchConfigurations()) {
             if (cfg.getName().equals(configName)) {
-                cfg.launch(ILaunchManager.DEBUG_MODE, new NullProgressMonitor());
+                cfg.launch(ILaunchManager.DEBUG_MODE, new NullProgressMonitor(), true);
                 return "launched: " + configName;
             }
         }
@@ -925,6 +1183,223 @@ public class JavaDebugController {
                 }
             }
         }
+    }
+
+    // --- Logpoint Handling ---
+
+    private final class LogpointBreakpointListener implements IJavaBreakpointListener {
+        @Override
+        public void addingBreakpoint(IJavaDebugTarget target, IJavaBreakpoint breakpoint) {}
+
+        @Override
+        public int installingBreakpoint(IJavaDebugTarget target, IJavaBreakpoint breakpoint, IJavaType type) {
+            return IJavaBreakpointListener.DONT_CARE;
+        }
+
+        @Override
+        public void breakpointInstalled(IJavaDebugTarget target, IJavaBreakpoint breakpoint) {}
+
+        @Override
+        public int breakpointHit(IJavaThread thread, IJavaBreakpoint breakpoint) {
+            if (!isLogpoint(breakpoint)) {
+                return IJavaBreakpointListener.DONT_CARE;
+            }
+            try {
+                handleLogpointHit(thread, breakpoint);
+            } catch (Exception ignored) {
+                // Logpoints must remain non-blocking even if snapshot or expression evaluation fails.
+            }
+            return IJavaBreakpointListener.DONT_SUSPEND;
+        }
+
+        @Override
+        public void breakpointRemoved(IJavaDebugTarget target, IJavaBreakpoint breakpoint) {}
+
+        @Override
+        public void breakpointHasRuntimeException(IJavaLineBreakpoint breakpoint, DebugException exception) {}
+
+        @Override
+        public void breakpointHasCompilationErrors(IJavaLineBreakpoint breakpoint, Message[] errors) {}
+    }
+
+    private void handleLogpointHit(IJavaThread thread, IJavaBreakpoint breakpoint) throws CoreException {
+        IMarker marker = breakpoint.getMarker();
+        if (marker == null || !marker.exists()) {
+            return;
+        }
+        String resourcePath = marker.getResource() != null
+            ? marker.getResource().getFullPath().toString()
+            : null;
+        String template = marker.getAttribute(ATTR_LOG_MESSAGE, (String) null);
+        boolean captureVars = marker.getAttribute(ATTR_LOG_CAPTURE_VARS, true);
+        int line = marker.getAttribute(IMarker.LINE_NUMBER, -1);
+
+        long threadId = (long) System.identityHashCode(thread);
+        String threadName = null;
+        try {
+            threadName = thread.getName();
+        } catch (DebugException ignored) {}
+
+        IStackFrame top = thread.getTopStackFrame();
+        String file = null;
+        String className = null;
+        String method = null;
+        if (top != null) {
+            try {
+                int topLine = top.getLineNumber();
+                if (topLine > 0) {
+                    line = topLine;
+                }
+            } catch (DebugException ignored) {}
+            if (top instanceof IJavaStackFrame jf) {
+                try {
+                    file = jf.getSourceName();
+                } catch (DebugException ignored) {}
+                try {
+                    className = jf.getDeclaringTypeName();
+                } catch (DebugException ignored) {}
+                try {
+                    method = jf.getMethodName();
+                } catch (DebugException ignored) {}
+            }
+        }
+
+        List<LogpointTemplate.Segment> segments = LogpointTemplate.parse(template);
+        List<String> expressions = LogpointTemplate.distinctExpressions(segments);
+        boolean needLocalLookup = false;
+        for (String expr : expressions) {
+            if (LogpointTemplate.isSimpleIdentifier(expr)) {
+                needLocalLookup = true;
+                break;
+            }
+        }
+
+        List<ExecutionTraceStore.VariableSnapshot> varSnapshots = captureVars ? new ArrayList<>() : null;
+        Map<String, LogpointTemplate.Value> localValuesByName = new HashMap<>();
+        if (top != null && (captureVars || needLocalLookup)) {
+            for (IVariable variable : top.getVariables()) {
+                String varName = variable.getName();
+                String varType = null;
+                String varValue = "<unavailable>";
+                boolean varIsNull = false;
+                boolean readOk = false;
+                try {
+                    IValue val = variable.getValue();
+                    if (val != null) {
+                        varValue = val.getValueString();
+                        varType = val.getReferenceTypeName();
+                        varIsNull = (val instanceof IJavaValue jv) && jv.isNull();
+                        readOk = true;
+                    }
+                } catch (Exception ignored) {}
+                if (captureVars) {
+                    varSnapshots.add(new ExecutionTraceStore.VariableSnapshot(varName, varType, varValue));
+                }
+                if (needLocalLookup && readOk) {
+                    localValuesByName.putIfAbsent(
+                        varName, new LogpointTemplate.Value(varValue, varType, varIsNull));
+                }
+            }
+        }
+
+        Map<String, LogpointTemplate.EvalOutcome> outcomes =
+            evaluateLogpointExpressions(thread, top, expressions, localValuesByName);
+        String renderedMessage = (template != null && !template.isBlank())
+            ? LogpointTemplate.render(segments, outcomes)
+            : null;
+        Map<String, ExecutionTraceStore.EvalSnapshot> evalSnapshots = toEvalSnapshots(outcomes);
+
+        ExecutionTraceStore.TraceEntry entry = traceStore.record(
+            System.currentTimeMillis(),
+            resourcePath,
+            file,
+            className,
+            method,
+            line,
+            threadId,
+            threadName,
+            template,
+            renderedMessage,
+            evalSnapshots,
+            captureVars ? varSnapshots : null);
+
+        Consumer<JsonObject> sink = this.eventSink;
+        if (sink != null) {
+            JsonObject ev = GSON.toJsonTree(ExecutionTraceStore.toEventMap(entry)).getAsJsonObject();
+            sink.accept(ev);
+        }
+    }
+
+    private Map<String, LogpointTemplate.EvalOutcome> evaluateLogpointExpressions(
+        IJavaThread thread,
+        IStackFrame top,
+        List<String> expressions,
+        Map<String, LogpointTemplate.Value> localValuesByName
+    ) throws CoreException {
+        if (expressions.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, LogpointTemplate.EvalOutcome> outcomes = new LinkedHashMap<>();
+        IAstEvaluationEngine engine = null;
+        String engineUnavailableReason = null;
+        try {
+            for (String expr : expressions) {
+                if (LogpointTemplate.isSimpleIdentifier(expr) && localValuesByName.containsKey(expr)) {
+                    outcomes.put(expr, localValuesByName.get(expr));
+                    continue;
+                }
+                if (engine == null && engineUnavailableReason == null) {
+                    if (!(top instanceof IJavaStackFrame javaFrame)) {
+                        engineUnavailableReason = "Top stack frame is not a Java stack frame";
+                    } else if (thread.isPerformingEvaluation()) {
+                        engineUnavailableReason = "Thread is already performing an evaluation";
+                    } else if (!(javaFrame.getDebugTarget() instanceof IJavaDebugTarget javaTarget)) {
+                        engineUnavailableReason = "Debug target is not a Java debug target";
+                    } else {
+                        IJavaProject javaProject = resolveJavaProjectForFrame(javaFrame);
+                        if (javaProject == null) {
+                            engineUnavailableReason = "Could not resolve Java project for stack frame";
+                        } else {
+                            engine = EvaluationManager.newAstEvaluationEngine(javaProject, javaTarget);
+                        }
+                    }
+                }
+                if (engine == null) {
+                    outcomes.put(expr, new LogpointTemplate.EvalError(engineUnavailableReason));
+                } else {
+                    outcomes.put(expr, evaluateExpressionOnEngine(engine, (IJavaStackFrame) top, expr, 5));
+                }
+            }
+        } finally {
+            if (engine != null) {
+                engine.dispose();
+            }
+        }
+        return outcomes;
+    }
+
+    private static Map<String, ExecutionTraceStore.EvalSnapshot> toEvalSnapshots(
+        Map<String, LogpointTemplate.EvalOutcome> outcomes
+    ) {
+        if (outcomes.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, ExecutionTraceStore.EvalSnapshot> snapshots = new LinkedHashMap<>();
+        for (Map.Entry<String, LogpointTemplate.EvalOutcome> e : outcomes.entrySet()) {
+            ExecutionTraceStore.EvalSnapshot snap = switch (e.getValue()) {
+                case LogpointTemplate.Value v -> new ExecutionTraceStore.EvalSnapshot(
+                    v.value(), v.type(), v.isNull(), null);
+                case LogpointTemplate.EvalError err -> new ExecutionTraceStore.EvalSnapshot(
+                    null, null, false, err.message());
+            };
+            snapshots.put(e.getKey(), snap);
+        }
+        return snapshots;
+    }
+
+    private static boolean isLogpoint(IJavaBreakpoint breakpoint) {
+        IMarker marker = breakpoint.getMarker();
+        return marker != null && marker.exists() && marker.getAttribute(ATTR_LOGPOINT, false);
     }
 
     private CoreException error(String message) {

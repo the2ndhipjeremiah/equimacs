@@ -42,6 +42,8 @@ public class Build {
                 buildCLI();
                 buildCliTests();
                 runCliTests();
+                buildDebugUnitTests();
+                runDebugUnitTests();
                 System.out.println(">>> Tests Successful");
                 return;
             }
@@ -358,6 +360,41 @@ public class Build {
                 + File.pathSeparator + ROOT.resolve("libs/protocol/build/libs/protocol.jar")
                 + File.pathSeparator + ROOT.resolve("libs/cli/build/classes")
                 + File.pathSeparator + getLib("gson");
+
+            runProcess(List.of(getJava(),
+                "-jar", getLib("junit-platform-console-standalone"),
+                "execute",
+                "--class-path", cp,
+                "--scan-class-path"));
+        });
+    }
+
+    private static void buildDebugUnitTests() throws Exception {
+        step("debug-unit-tests", () -> {
+            Path debugDir = ROOT.resolve("plugins/org.equimacs.debug");
+            Path mainSrc = debugDir.resolve("src/main/java/org/equimacs/debug");
+            Path testSrc = debugDir.resolve("src/test/java");
+            Path out = debugDir.resolve("build/test-classes");
+            if (Files.exists(out)) deleteDir(out);
+            Files.createDirectories(out);
+
+            List<String> javacCmd = new ArrayList<>(List.of(
+                getJavac(),
+                "-cp", getLib("junit-platform-console-standalone"),
+                "-d", out.toString(),
+                "--release", "26",
+                mainSrc.resolve("LogpointTemplate.java").toString(),
+                mainSrc.resolve("ExecutionTraceStore.java").toString()));
+            try (Stream<Path> s = Files.walk(testSrc)) {
+                s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
+            }
+            runProcess(javacCmd);
+        });
+    }
+
+    private static void runDebugUnitTests() throws Exception {
+        step("debug-unit-test", () -> {
+            String cp = ROOT.resolve("plugins/org.equimacs.debug/build/test-classes").toString();
 
             runProcess(List.of(getJava(),
                 "-jar", getLib("junit-platform-console-standalone"),

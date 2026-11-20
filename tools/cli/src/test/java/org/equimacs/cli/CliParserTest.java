@@ -101,6 +101,98 @@ class CliParserTest {
         assertInstanceOf(Request.Shutdown.class, parse("shutdown"));
     }
 
+    @Test
+    void parsesCustomCommand() {
+        Request.CustomCommand withoutArgs = assertInstanceOf(
+            Request.CustomCommand.class, parse("custom", "my-ext", "ping"));
+        assertEquals("my-ext", withoutArgs.target());
+        assertEquals("ping", withoutArgs.action());
+        org.junit.jupiter.api.Assertions.assertNull(withoutArgs.args());
+
+        Request.CustomCommand withArgs = assertInstanceOf(
+            Request.CustomCommand.class, parse("custom", "my-ext", "echo", "{\"x\":1}"));
+        assertEquals("{\"x\":1}", withArgs.args());
+
+        Request.CustomCommand withFlag = assertInstanceOf(
+            Request.CustomCommand.class, parse("custom", "my-ext", "echo", "--args", "{\"x\":2}"));
+        assertEquals("{\"x\":2}", withFlag.args());
+    }
+
+    @Test
+    void parsesNavigationAndOpenFileCommands() {
+        Request.FindReferences refs = assertInstanceOf(
+            Request.FindReferences.class, parse("find-refs", "/proj/src/A.java:42"));
+        assertEquals("/proj/src/A.java", refs.file());
+        assertEquals(42, refs.offset());
+
+        Request.CallHierarchy calls = assertInstanceOf(
+            Request.CallHierarchy.class, parse("call-hierarchy", "/proj/src/A.java:100", "--direction", "callees", "--depth", "3"));
+        assertEquals("callees", calls.direction());
+        assertEquals(3, calls.depth());
+
+        Request.TypeHierarchy types = assertInstanceOf(
+            Request.TypeHierarchy.class, parse("type-hierarchy", "/proj/src/A.java:15"));
+        assertEquals(15, types.offset());
+
+        Request.OpenFile openRange = assertInstanceOf(
+            Request.OpenFile.class, parse("open-file", "/proj/src/A.java:10-20"));
+        assertEquals("/proj/src/A.java", openRange.file());
+        assertEquals(10, openRange.line());
+        assertEquals(20, openRange.endLine());
+
+        Request.OpenFile openNoLine = assertInstanceOf(
+            Request.OpenFile.class, parse("open-file", "C:\\proj\\A.java"));
+        assertEquals("C:\\proj\\A.java", openNoLine.file());
+        assertEquals(-1, openNoLine.line());
+    }
+
+    @Test
+    void parsesEvaluateCommand() {
+        Request.Evaluate eval = assertInstanceOf(
+            Request.Evaluate.class, parse("eval", "12345", "value + next"));
+        assertEquals(12345L, eval.frameId());
+        assertEquals("value + next", eval.expression());
+
+        Request.Evaluate evaluate = assertInstanceOf(
+            Request.Evaluate.class, parse("evaluate", "99", "a", "+", "b"));
+        assertEquals(99L, evaluate.frameId());
+        assertEquals("a + b", evaluate.expression());
+    }
+
+    @Test
+    void parsesLogpointAndTraceCommands() {
+        Request.SetLogpoint posMsg = assertInstanceOf(
+            Request.SetLogpoint.class, parse("logpoint", "/proj/src/App.java:10", "i={i}", "-c", "i > 0"));
+        assertEquals("/proj/src/App.java", posMsg.path());
+        assertEquals(10, posMsg.line());
+        assertEquals("i={i}", posMsg.message());
+        assertEquals("i > 0", posMsg.condition());
+        assertEquals(Boolean.TRUE, posMsg.captureVars());
+
+        Request.SetLogpoint aliasNoVars = assertInstanceOf(
+            Request.SetLogpoint.class, parse("lp", "/proj/src/App.java:12", "-m", "val={x}", "--no-vars"));
+        assertEquals("/proj/src/App.java", aliasNoVars.path());
+        assertEquals(12, aliasNoVars.line());
+        assertEquals("val={x}", aliasNoVars.message());
+        org.junit.jupiter.api.Assertions.assertNull(aliasNoVars.condition());
+        assertEquals(Boolean.FALSE, aliasNoVars.captureVars());
+
+        Request.SetLogpoint varsFalse = assertInstanceOf(
+            Request.SetLogpoint.class, parse("logpoint", "/proj/src/App.java:14", "--vars", "false", "only msg"));
+        assertEquals("only msg", varsFalse.message());
+        assertEquals(Boolean.FALSE, varsFalse.captureVars());
+
+        Request.SetLogpoint noMsg = assertInstanceOf(
+            Request.SetLogpoint.class, parse("logpoint", "/proj/src/App.java:16"));
+        org.junit.jupiter.api.Assertions.assertNull(noMsg.message());
+        assertEquals(Boolean.TRUE, noMsg.captureVars());
+
+        assertEquals(new Request.GetTrace(100), parse("trace"));
+        assertEquals(new Request.GetTrace(25), parse("trace", "--limit", "25"));
+        assertEquals(new Request.GetTrace(10), parse("trace", "-n", "10"));
+        assertInstanceOf(Request.ClearTrace.class, parse("trace-clear"));
+    }
+
     private static Request parse(String... args) {
         return EquimacsCLI.parseCommand(CliArgs.parse(args));
     }

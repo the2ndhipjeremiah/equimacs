@@ -7,7 +7,11 @@ import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicReference;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IMarker;
+import org.eclipse.core.resources.IResource;
+import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.Path;
 import org.eclipse.jface.text.IDocument;
+import org.eclipse.jface.text.IRegion;
 import org.eclipse.jface.text.ITextSelection;
 import org.eclipse.jface.text.Position;
 import org.eclipse.jface.text.source.Annotation;
@@ -110,6 +114,7 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
             case Request.EclipseWorkbench _ -> eclipseWorkbench();
             case Request.EclipseEditorDiagnostics _ -> eclipseEditorDiagnostics();
             case Request.ReviewEditorDiagnostics r -> reviewEditorDiagnostics(r.file(), r.line());
+            case Request.OpenFile o -> openFile(o.file(), o.line(), o.endLine());
             default -> throw new IllegalArgumentException(
                 "ReviewCommandHandler: no handler for " + req.getClass().getSimpleName());
         };
@@ -134,6 +139,68 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
         result.put("markers", ReviewMarkerManager.diagnostics(file));
         result.put("annotationPreferences", prefValues);
         return result;
+    }
+
+    private Map<String, Object> openFile(String filePath, int line, int endLine) {
+        if (filePath == null || filePath.isBlank()) {
+            throw new IllegalArgumentException("OpenFile requires a non-blank file path");
+        }
+        IFile file = resolveWorkspaceFile(filePath);
+        if (file == null) {
+            throw new IllegalArgumentException("File not found in workspace: " + filePath);
+        }
+        return uiRead(() -> {
+            if (!PlatformUI.isWorkbenchRunning()) {
+                throw new IllegalStateException("Eclipse workbench is not running");
+            }
+            WorkbenchState state = activeWorkbenchState();
+            if (state.page == null) {
+                throw new IllegalStateException("No active Eclipse workbench page");
+            }
+            try {
+                IEditorPart editor = org.eclipse.ui.ide.IDE.openEditor(state.page, file, true);
+                int offset = -1;
+                int length = 0;
+                int resolvedStart = line;
+                int resolvedEnd = endLine;
+                if (line > 0 && editor instanceof ITextEditor textEditor) {
+                    IDocumentProvider provider = textEditor.getDocumentProvider();
+                    IDocument doc = provider != null ? provider.getDocument(textEditor.getEditorInput()) : null;
+                    if (doc != null && doc.getNumberOfLines() > 0) {
+                        resolvedStart = Math.max(1, Math.min(line, doc.getNumberOfLines()));
+                        resolvedEnd = endLine >= resolvedStart
+                            ? Math.min(endLine, doc.getNumberOfLines())
+                            : resolvedStart;
+                        IRegion startInfo = doc.getLineInformation(resolvedStart - 1);
+                        IRegion endInfo = doc.getLineInformation(resolvedEnd - 1);
+                        offset = startInfo.getOffset();
+                        length = Math.max(0, (endInfo.getOffset() + endInfo.getLength()) - offset);
+                        textEditor.selectAndReveal(offset, length);
+                    }
+                }
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("opened", true);
+                result.put("file", file.getFullPath().toString());
+                result.put("line", resolvedStart);
+                result.put("endLine", resolvedEnd);
+                result.put("offset", offset);
+                result.put("length", length);
+                result.put("editorTitle", editor != null ? editor.getTitle() : null);
+                return result;
+            } catch (Exception e) {
+                throw new IllegalStateException("Failed to open editor: " + e.getMessage(), e);
+            }
+        });
+    }
+
+    private static IFile resolveWorkspaceFile(String pathStr) {
+        IResource member = ResourcesPlugin.getWorkspace().getRoot().findMember(new Path(pathStr));
+        if (member instanceof IFile file) {
+            return file;
+        }
+        IFile[] files = ResourcesPlugin.getWorkspace().getRoot().findFilesForLocationURI(
+            java.net.URI.create("file:///" + pathStr.replace("\\", "/")));
+        return files.length > 0 ? files[0] : null;
     }
 
     private Map<String, Object> eclipseWorkbench() {

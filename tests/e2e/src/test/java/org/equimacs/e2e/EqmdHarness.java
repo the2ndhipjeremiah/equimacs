@@ -15,7 +15,7 @@ import org.equimacs.protocol.Request;
 
 final class EqmdHarness implements AutoCloseable {
     private static final Duration STARTUP_TIMEOUT = Duration.ofSeconds(90);
-    private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(30);
 
     private final Path home;
     private final Path log;
@@ -82,7 +82,8 @@ final class EqmdHarness implements AutoCloseable {
             }
         } finally {
             if (process.isAlive()) {
-                process.destroyForcibly();
+                destroyProcessTree();
+                process.waitFor(5, TimeUnit.SECONDS);
             }
             deleteDir(home);
         }
@@ -91,7 +92,7 @@ final class EqmdHarness implements AutoCloseable {
     void destroyForcibly() throws Exception {
         try {
             if (process.isAlive()) {
-                process.destroyForcibly();
+                destroyProcessTree();
                 process.waitFor(SHUTDOWN_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
             }
         } finally {
@@ -99,7 +100,20 @@ final class EqmdHarness implements AutoCloseable {
         }
     }
 
+    private void destroyProcessTree() {
+        process.descendants().forEach(ProcessHandle::destroyForcibly);
+        process.destroyForcibly();
+    }
+
     void awaitReady() throws Exception {
+        awaitReady(true);
+    }
+
+    void awaitBridgeReady() throws Exception {
+        awaitReady(false);
+    }
+
+    private void awaitReady(boolean requireShutdown) throws Exception {
         long deadline = System.nanoTime() + STARTUP_TIMEOUT.toNanos();
         Exception last = null;
         while (System.nanoTime() < deadline) {
@@ -107,16 +121,20 @@ final class EqmdHarness implements AutoCloseable {
                 throw new AssertionError("eqmd exited during startup. Log:\n" + logTail());
             }
             try {
-                JsonObject response = rpc.request(new Request.WaitEvent(1));
-                if (response.has("result")
-                    && response.getAsJsonObject("result").has("event")
-                    && response.getAsJsonObject("result").get("event").getAsString().equals("Timeout")) {
-                    return;
+                JsonObject response = rpc.request(new Request.HandlerDiagnostics());
+                if (response.has("result")) {
+                    JsonObject result = response.getAsJsonObject("result");
+                    if (result.has("commands") && result.get("commands").isJsonObject()) {
+                        JsonObject commands = result.getAsJsonObject("commands");
+                        if (commands.has("ListBreakpoints") && (!requireShutdown || commands.has("Shutdown"))) {
+                            return;
+                        }
+                    }
                 }
             } catch (Exception e) {
                 last = e;
             }
-            Thread.sleep(1_000);
+            Thread.sleep(500);
         }
         throw new AssertionError("eqmd did not become ready. Last error: "
             + (last == null ? "(none)" : last.getMessage()) + "\nLog:\n" + logTail());

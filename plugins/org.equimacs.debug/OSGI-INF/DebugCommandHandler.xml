@@ -10,6 +10,9 @@
    </service>
    <property name="equimacs.commands" type="String">
 SetBreakpoint
+SetLogpoint
+GetTrace
+ClearTrace
 ClearAllBreakpoints
 ListBreakpoints
 Resume
@@ -19,6 +22,7 @@ GetWorkspace
 GetThreads
 GetStack
 GetVariables
+Evaluate
 GetProblems
 Build
 GetQuickFixes
@@ -34,6 +38,9 @@ Launch
 ListLaunches
 ListSessions
 Terminate
+FindReferences
+CallHierarchy
+TypeHierarchy
    </property>
    <reference name="bridge"
               interface="org.equimacs.eclipse.bridge.api.IBridgeService"

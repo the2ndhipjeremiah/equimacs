@@ -13,6 +13,11 @@ public sealed interface Request {
     record ClearAllBreakpoints() implements Request {}
     record ListBreakpoints() implements Request {}
 
+    // --- Logpoints & Execution Trace ---
+    record SetLogpoint(String path, int line, String message, String condition, Boolean captureVars) implements Request {}
+    record GetTrace(int limit) implements Request {}
+    record ClearTrace() implements Request {}
+
     // --- Execution Control ---
     record Resume() implements Request {}
     record Suspend() implements Request {}
@@ -28,6 +33,7 @@ public sealed interface Request {
     record GetThreads() implements Request {}
     record GetStack(long threadId) implements Request {}
     record GetVariables(long frameId) implements Request {}
+    record Evaluate(long frameId, String expression) implements Request {}
     record GetProblems(String project, String severity) implements Request {}
     record Build(String project, String kind) implements Request {}
     record GetQuickFixes(String file, int line) implements Request {}
@@ -65,6 +71,15 @@ public sealed interface Request {
 
     // --- Headless Daemon ---
     record Shutdown() implements Request {}
+
+    // --- Extension Seam ---
+    record CustomCommand(String target, String action, String args) implements Request {}
+
+    // --- Navigation & Code Understanding ---
+    record FindReferences(String file, int offset) implements Request {}
+    record CallHierarchy(String file, int offset, String direction, int depth) implements Request {}
+    record TypeHierarchy(String file, int offset) implements Request {}
+    record OpenFile(String file, int line, int endLine) implements Request {}
 
     /**
      * Types of stepping available.

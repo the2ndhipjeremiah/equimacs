@@ -61,6 +61,50 @@ public class EquimacsCLI {
                         Integer.parseInt(spec.substring(lastColon + 1)),
                         cli.getOption("condition", "c"));
                 }
+                case "logpoint", "lp" -> {
+                    if (args.size() < 2) {
+                        throw new CliParseException(
+                            "Usage: logpoint <file>:<line> [message...] [-m <template>] [-c <condition>] [--no-vars]");
+                    }
+                    String spec = args.get(1);
+                    int lastColon = spec.lastIndexOf(':');
+                    if (lastColon <= 0) {
+                        throw new CliParseException("Usage: logpoint <file>:<line> (missing line number)");
+                    }
+                    String message = cli.getOption("message", "m");
+                    if (message == null && args.size() > 2) {
+                        message = String.join(" ", args.subList(2, args.size()));
+                    }
+                    String condition = cli.getOption("condition", "c");
+                    boolean captureVars = true;
+                    if (cli.hasFlag("no-vars")) {
+                        captureVars = false;
+                    } else {
+                        String varsOpt = cli.getOption("vars");
+                        if (varsOpt != null) {
+                            if ("true".equalsIgnoreCase(varsOpt)) {
+                                captureVars = true;
+                            } else if ("false".equalsIgnoreCase(varsOpt)) {
+                                captureVars = false;
+                            } else {
+                                throw new CliParseException(
+                                    "Invalid --vars value (expected true or false): " + varsOpt);
+                            }
+                        }
+                    }
+                    yield new Request.SetLogpoint(
+                        spec.substring(0, lastColon),
+                        Integer.parseInt(spec.substring(lastColon + 1)),
+                        message,
+                        condition,
+                        captureVars);
+                }
+                case "trace" -> {
+                    String limitStr = cli.getOption("limit", "n");
+                    int limit = limitStr != null ? Integer.parseInt(limitStr) : 100;
+                    yield new Request.GetTrace(limit);
+                }
+                case "trace-clear" -> new Request.ClearTrace();
                 case "list", "bps" -> new Request.ListBreakpoints();
                 case "clear" -> new Request.ClearAllBreakpoints();
                 case "resume" -> new Request.Resume();
@@ -156,6 +200,12 @@ public class EquimacsCLI {
                     if (args.size() < 2) throw new CliParseException("Usage: vars <frameId>");
                     yield new Request.GetVariables(Long.parseLong(args.get(1)));
                 }
+                case "eval", "evaluate" -> {
+                    if (args.size() < 3) throw new CliParseException("Usage: eval <frameId> <expression...>");
+                    yield new Request.Evaluate(
+                        Long.parseLong(args.get(1)),
+                        String.join(" ", args.subList(2, args.size())));
+                }
                 case "wait-event" -> {
                     String t = cli.getOption("timeout", "t");
                     yield new Request.WaitEvent(t != null ? Integer.parseInt(t) : 30_000);
@@ -168,6 +218,82 @@ public class EquimacsCLI {
                 case "sessions" -> new Request.ListSessions();
                 case "terminate" -> new Request.Terminate();
                 case "shutdown" -> new Request.Shutdown();
+                case "custom" -> {
+                    if (args.size() < 3) {
+                        throw new CliParseException("Usage: custom <target> <action> [argsJson | --args <json>]");
+                    }
+                    String argsJson = cli.getOption("args");
+                    if (argsJson == null && args.size() > 3) {
+                        argsJson = String.join(" ", args.subList(3, args.size()));
+                    }
+                    yield new Request.CustomCommand(args.get(1), args.get(2), argsJson);
+                }
+                case "find-refs" -> {
+                    if (args.size() < 2) {
+                        throw new CliParseException("Usage: find-refs <file>:<offset>");
+                    }
+                    String spec = args.get(1);
+                    int lastColon = spec.lastIndexOf(':');
+                    if (lastColon <= 0) {
+                        throw new CliParseException("Usage: find-refs <file>:<offset>");
+                    }
+                    yield new Request.FindReferences(
+                        spec.substring(0, lastColon),
+                        Integer.parseInt(spec.substring(lastColon + 1)));
+                }
+                case "call-hierarchy" -> {
+                    if (args.size() < 2) {
+                        throw new CliParseException("Usage: call-hierarchy <file>:<offset> [--direction callers|callees] [--depth <n>]");
+                    }
+                    String spec = args.get(1);
+                    int lastColon = spec.lastIndexOf(':');
+                    if (lastColon <= 0) {
+                        throw new CliParseException("Usage: call-hierarchy <file>:<offset>");
+                    }
+                    String direction = cli.getOption("direction", "d");
+                    String depthStr = cli.getOption("depth");
+                    int depth = depthStr != null ? Integer.parseInt(depthStr) : 1;
+                    yield new Request.CallHierarchy(
+                        spec.substring(0, lastColon),
+                        Integer.parseInt(spec.substring(lastColon + 1)),
+                        direction != null ? direction : "callers",
+                        depth);
+                }
+                case "type-hierarchy" -> {
+                    if (args.size() < 2) {
+                        throw new CliParseException("Usage: type-hierarchy <file>:<offset>");
+                    }
+                    String spec = args.get(1);
+                    int lastColon = spec.lastIndexOf(':');
+                    if (lastColon <= 0) {
+                        throw new CliParseException("Usage: type-hierarchy <file>:<offset>");
+                    }
+                    yield new Request.TypeHierarchy(
+                        spec.substring(0, lastColon),
+                        Integer.parseInt(spec.substring(lastColon + 1)));
+                }
+                case "open-file" -> {
+                    if (args.size() < 2) {
+                        throw new CliParseException("Usage: open-file <file>[:<line>[-<endLine>]]");
+                    }
+                    String spec = args.get(1);
+                    int lastColon = spec.lastIndexOf(':');
+                    // Guard against Windows drive letter like C:\foo\Bar.java
+                    if (lastColon <= 1) {
+                        yield new Request.OpenFile(spec, -1, -1);
+                    }
+                    String suffix = spec.substring(lastColon + 1);
+                    String filePart = spec.substring(0, lastColon);
+                    int dash = suffix.indexOf('-');
+                    if (dash > 0) {
+                        yield new Request.OpenFile(
+                            filePart,
+                            Integer.parseInt(suffix.substring(0, dash)),
+                            Integer.parseInt(suffix.substring(dash + 1)));
+                    }
+                    int line = Integer.parseInt(suffix);
+                    yield new Request.OpenFile(filePart, line, line);
+                }
                 case "review-add" -> {
                     if (args.size() < 3) throw new CliParseException("Usage: review-add <file>:<line> <text...> [--author <name>]");
                     String spec = args.get(1);

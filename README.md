@@ -102,6 +102,9 @@ Current commands:
 
 ```text
 eqm-cli bp <file>:<line> [-c <condition>]
+eqm-cli logpoint <file>:<line> [message...] [-m <template>] [-c <condition>] [--no-vars]
+eqm-cli trace [--limit <n>]
+eqm-cli trace-clear
 eqm-cli list
 eqm-cli clear
 eqm-cli resume
@@ -110,6 +113,7 @@ eqm-cli step [over|into|return]
 eqm-cli threads
 eqm-cli stack <threadId>
 eqm-cli vars <frameId>
+eqm-cli eval <frameId> <expression...>
 eqm-cli reload
 eqm-cli gogo <command...>
 eqm-cli handlers
@@ -138,6 +142,11 @@ eqm-cli review-diagnostics [file]
 eqm-cli eclipse-workbench
 eqm-cli eclipse-editor-diagnostics
 eqm-cli review-editor-diagnostics [file[:line]]
+eqm-cli custom <target> <action> [argsJson | --args <json>]
+eqm-cli find-refs <file>:<offset>
+eqm-cli call-hierarchy <file>:<offset> [--direction callers|callees] [--depth <n>]
+eqm-cli type-hierarchy <file>:<offset>
+eqm-cli open-file <file>[:<line>[-<endLine>]]
 eqm-cli shutdown
 eqm-cli --schema
 ```
@@ -145,6 +154,53 @@ eqm-cli --schema
 `shutdown` is only handled by the headless daemon. In the IDE bridge it should
 fail with no registered handler, so the CLI cannot accidentally close the GUI
 Eclipse process.
+
+### Common Workflows
+
+**1. Non-blocking execution tracing (`logpoint` / `trace`)**
+
+Trace values across iterations without modifying source files, rebuilding, or pausing the JVM:
+
+```powershell
+eqm-cli logpoint /myproject/src/OrderService.java:42 "order={orderId}, total={price * qty}" -c "qty > 1"
+eqm-cli launch MyApp
+eqm-cli wait-event            # emits LogpointHit events without suspending execution
+eqm-cli trace --limit 20      # inspect the most recent buffered entries (ring buffer holds 500)
+eqm-cli trace-clear
+```
+
+- Pass `--vars false` (or trailing `--no-vars`) to omit local variable snapshots on hot paths.
+- Logpoints coexist with regular breakpoints: place conditional `logpoint` probes upstream and a `bp` downstream to capture the trail leading into a failure before suspending.
+- `eqm-cli bps` reports `"kind": "logpoint"` vs `"breakpoint"`; `eqm-cli clear` removes both.
+
+**2. Suspended frame inspection & evaluation (`eval`)**
+
+```powershell
+eqm-cli bp /myproject/src/OrderService.java:58
+eqm-cli launch MyApp
+eqm-cli wait-event            # note threadId from BreakpointHit
+eqm-cli threads
+eqm-cli stack <threadId>      # note frameId
+eqm-cli vars <frameId>
+eqm-cli eval <frameId> "items.stream().filter(i -> i.qty() > 0).count()"
+```
+
+**3. Static JDT navigation & IDE jump**
+
+```powershell
+eqm-cli find-refs /myproject/src/OrderService.java:412
+eqm-cli call-hierarchy /myproject/src/OrderService.java:412 --direction callers --depth 3
+eqm-cli type-hierarchy /myproject/src/OrderService.java:85
+eqm-cli open-file /myproject/src/OrderService.java:40-55
+```
+
+**4. External OSGi bundle extensions (`custom`)**
+
+Third-party OSGi bundles deployed into `<eclipse-home>/dropins/` can register an `IBridgeCommandHandler` with service property `equimacs.commands=custom:<target>` and handle requests without modifying Equimacs core:
+
+```powershell
+eqm-cli custom my-ext inspect --args '{"scope":"workspace"}'
+```
 
 ## `eqm-mgr`
 

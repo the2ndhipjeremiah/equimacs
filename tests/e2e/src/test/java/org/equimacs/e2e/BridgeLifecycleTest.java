@@ -46,7 +46,7 @@ class BridgeLifecycleTest {
             assertTrue(reload.get("result").getAsString().startsWith("Reloading..."), reload::toString);
 
             Thread.sleep(1_000);
-            reloadHarness.awaitReady();
+            reloadHarness.awaitBridgeReady();
 
             JsonObject afterReload = reloadHarness.rpc().request(new Request.ListBreakpoints());
             assertTrue(afterReload.has("result"), afterReload::toString);

@@ -25,6 +25,9 @@ final class BridgeProtocol {
     private static Class<? extends Request> requestClassFor(String type) {
         return switch (type) {
             case "SetBreakpoint" -> Request.SetBreakpoint.class;
+            case "SetLogpoint" -> Request.SetLogpoint.class;
+            case "GetTrace" -> Request.GetTrace.class;
+            case "ClearTrace" -> Request.ClearTrace.class;
             case "ClearAllBreakpoints" -> Request.ClearAllBreakpoints.class;
             case "ListBreakpoints" -> Request.ListBreakpoints.class;
             case "Resume" -> Request.Resume.class;
@@ -37,6 +40,7 @@ final class BridgeProtocol {
             case "GetThreads" -> Request.GetThreads.class;
             case "GetStack" -> Request.GetStack.class;
             case "GetVariables" -> Request.GetVariables.class;
+            case "Evaluate" -> Request.Evaluate.class;
             case "GetProblems" -> Request.GetProblems.class;
             case "Build" -> Request.Build.class;
             case "GetQuickFixes" -> Request.GetQuickFixes.class;
@@ -62,6 +66,11 @@ final class BridgeProtocol {
             case "EclipseEditorDiagnostics" -> Request.EclipseEditorDiagnostics.class;
             case "ReviewEditorDiagnostics" -> Request.ReviewEditorDiagnostics.class;
             case "Shutdown" -> Request.Shutdown.class;
+            case "CustomCommand" -> Request.CustomCommand.class;
+            case "FindReferences" -> Request.FindReferences.class;
+            case "CallHierarchy" -> Request.CallHierarchy.class;
+            case "TypeHierarchy" -> Request.TypeHierarchy.class;
+            case "OpenFile" -> Request.OpenFile.class;
             default -> throw new JsonParseException("Unknown request type: " + type);
         };
     }

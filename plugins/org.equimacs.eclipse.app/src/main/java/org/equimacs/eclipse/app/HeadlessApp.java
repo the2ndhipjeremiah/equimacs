@@ -30,10 +30,10 @@ public final class HeadlessApp implements IApplication {
     @Override
     public Object start(IApplicationContext ctx) throws Exception {
         ctx.applicationRunning();
+        importWorkspaceProjects();
         registerShutdownHandler();
         log("HeadlessApp.start: forcing bridge service activation");
         forceBridgeActivation();
-        importWorkspaceProjects();
         log("HeadlessApp.start: bridge active, parking main thread");
         synchronized (shutdownLock) {
             while (!stopRequested) {

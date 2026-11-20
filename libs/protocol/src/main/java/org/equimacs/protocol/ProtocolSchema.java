@@ -18,6 +18,30 @@ public class ProtocolSchema {
             "condition": { "type": "string", "optional": true, "description": "Conditional expression (Java/JS)" }
           }
         },
+        "logpoint": {
+          "description": "Set a non-blocking logpoint that records interpolated messages and variable snapshots",
+          "aliases": ["lp"],
+          "record": "SetLogpoint",
+          "params": {
+            "path": { "type": "string", "description": "Workspace-relative or absolute file path" },
+            "line": { "type": "integer", "description": "1-based line number" },
+            "message": { "type": "string", "optional": true, "description": "Message template with {expr} placeholders" },
+            "condition": { "type": "string", "optional": true, "description": "Conditional Java expression" },
+            "captureVars": { "type": "boolean", "optional": true, "default": true, "description": "Whether to capture local variable snapshots" }
+          }
+        },
+        "trace": {
+          "description": "Retrieve recent execution trace entries recorded by logpoints",
+          "record": "GetTrace",
+          "params": {
+            "limit": { "type": "integer", "optional": true, "default": 100, "description": "Maximum number of recent entries to return" }
+          }
+        },
+        "trace-clear": {
+          "description": "Clear the execution trace buffer",
+          "record": "ClearTrace",
+          "params": {}
+        },
         "list": {
           "description": "List all registered breakpoints",
           "aliases": ["bps"],
@@ -80,6 +104,15 @@ public class ProtocolSchema {
           "record": "GetVariables",
           "params": {
             "frameId": { "type": "long", "description": "Unique ID of the stack frame" }
+          }
+        },
+        "eval": {
+          "description": "Evaluate a Java expression in a suspended stack frame",
+          "aliases": ["evaluate"],
+          "record": "Evaluate",
+          "params": {
+            "frameId": { "type": "long", "description": "Unique ID of the stack frame" },
+            "expression": { "type": "string", "description": "Java expression to evaluate" }
           }
         },
         "refactor-prepare": {
@@ -170,6 +203,50 @@ public class ProtocolSchema {
             "file": { "type": "string", "optional": true, "description": "Workspace-relative file path" },
             "line": { "type": "integer", "optional": true, "description": "1-based line number" }
           }
+        },
+        "custom": {
+          "description": "Invoke a custom IBridgeCommandHandler registered by an external OSGi bundle",
+          "record": "CustomCommand",
+          "params": {
+            "target": { "type": "string", "description": "Handler target key (equimacs.commands)" },
+            "action": { "type": "string", "description": "Action name within the target handler" },
+            "args": { "type": "string", "optional": true, "description": "Optional JSON payload string" }
+          }
+        },
+        "find-refs": {
+          "description": "Find all workspace references to the Java symbol at <file>:<offset>",
+          "record": "FindReferences",
+          "params": {
+            "file": { "type": "string", "description": "Workspace-relative or absolute Java file path" },
+            "offset": { "type": "integer", "description": "0-based character offset inside the file" }
+          }
+        },
+        "call-hierarchy": {
+          "description": "Compute callers or callees for the Java method at <file>:<offset>",
+          "record": "CallHierarchy",
+          "params": {
+            "file": { "type": "string", "description": "Workspace-relative or absolute Java file path" },
+            "offset": { "type": "integer", "description": "0-based character offset inside the file" },
+            "direction": { "type": "string", "enum": ["callers", "callees"], "default": "callers" },
+            "depth": { "type": "integer", "default": 1, "description": "Traversal depth (1..5)" }
+          }
+        },
+        "type-hierarchy": {
+          "description": "Inspect superclasses, interfaces, and subtypes for the Java type at <file>:<offset>",
+          "record": "TypeHierarchy",
+          "params": {
+            "file": { "type": "string", "description": "Workspace-relative or absolute Java file path" },
+            "offset": { "type": "integer", "description": "0-based character offset inside the file" }
+          }
+        },
+        "open-file": {
+          "description": "Open a file in the active Eclipse workbench editor and optionally select a line or line range",
+          "record": "OpenFile",
+          "params": {
+            "file": { "type": "string", "description": "Workspace-relative or absolute file path" },
+            "line": { "type": "integer", "optional": true, "description": "1-based start line" },
+            "endLine": { "type": "integer", "optional": true, "description": "1-based end line" }
+          }
         }
       },
       "responses": {
@@ -177,6 +254,7 @@ public class ProtocolSchema {
         "Error": { "fields": ["message (string)", "trace (string/null)"] },
         "Events": {
           "BreakpointHit": { "fields": ["path", "line", "threadId"] },
+          "LogpointHit": { "fields": ["seq", "timestampMs", "resource", "file", "class", "method", "line", "threadId", "threadName", "template", "message", "evaluations", "variables"] },
           "StepCompleted": { "fields": ["threadId"] },
           "ThreadSuspended": { "fields": ["threadId", "reason"] },
           "ThreadResumed": { "fields": ["threadId"] },

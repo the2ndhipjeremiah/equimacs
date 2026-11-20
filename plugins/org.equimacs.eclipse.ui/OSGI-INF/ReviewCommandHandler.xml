@@ -17,6 +17,7 @@ ReviewDiagnostics
 EclipseWorkbench
 EclipseEditorDiagnostics
 ReviewEditorDiagnostics
+OpenFile
    </property>
    <reference name="bridge"
               interface="org.equimacs.eclipse.bridge.api.IBridgeService"

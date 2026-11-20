@@ -134,6 +134,7 @@ public final class BridgeServiceImpl implements IBridgeService {
             case Request.Reload _ -> reloadBundle();
             case Request.GogoExec g -> executeGogo(g.command());
             case Request.HandlerDiagnostics _ -> handlerDiagnostics();
+            case Request.CustomCommand c -> dispatchCustom(c);
             default -> {
                 String typeName = req.getClass().getSimpleName();
                 IBridgeCommandHandler handler = dispatchMap.get(typeName);
@@ -143,6 +144,21 @@ public final class BridgeServiceImpl implements IBridgeService {
                 yield handler.handle(req);
             }
         };
+    }
+
+    private Object dispatchCustom(Request.CustomCommand cmd) throws Exception {
+        String target = cmd.target();
+        if (target == null || target.isBlank()) {
+            throw new IllegalArgumentException("CustomCommand requires a non-blank target");
+        }
+        IBridgeCommandHandler handler = dispatchMap.get("custom:" + target);
+        if (handler == null) {
+            handler = dispatchMap.get(target);
+        }
+        if (handler == null) {
+            throw new IllegalArgumentException("No custom handler registered for target: " + target);
+        }
+        return handler.handle(cmd);
     }
 
     // --- Server lifecycle ---
@@ -325,7 +341,8 @@ public final class BridgeServiceImpl implements IBridgeService {
             Request.WaitEvent.class.getSimpleName(),
             Request.Reload.class.getSimpleName(),
             Request.GogoExec.class.getSimpleName(),
-            Request.HandlerDiagnostics.class.getSimpleName());
+            Request.HandlerDiagnostics.class.getSimpleName(),
+            Request.CustomCommand.class.getSimpleName());
     }
 
     private static List<String> optionalRequests() {

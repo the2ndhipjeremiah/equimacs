@@ -7,6 +7,7 @@ import org.equimacs.protocol.Request;
 public final class DebugCommandHandler implements IBridgeCommandHandler {
 
     private volatile JavaDebugController controller;
+    private final JavaNavigationService navigation = new JavaNavigationService();
     private volatile IBridgeService bridge;
 
     void setBridge(IBridgeService bridge) {
@@ -39,6 +40,10 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
                 yield "Breakpoint set at " + b.path() + ":" + b.line()
                     + (b.condition() != null ? " with condition: " + b.condition() : "");
             }
+            case Request.SetLogpoint lp -> c.setLogpoint(
+                lp.path(), lp.line(), lp.message(), lp.condition(), lp.captureVars());
+            case Request.GetTrace t -> c.getTrace(t.limit());
+            case Request.ClearTrace _ -> c.clearTrace();
             case Request.ListBreakpoints _ -> c.listBreakpoints();
             case Request.ClearAllBreakpoints _ -> {
                 c.clearAllBreakpoints();
@@ -64,6 +69,7 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
             case Request.GetThreads _ -> c.getThreads();
             case Request.GetStack s -> c.getStack(s.threadId());
             case Request.GetVariables v -> c.getVariables(v.frameId());
+            case Request.Evaluate e -> c.evaluate(e.frameId(), e.expression());
             case Request.GetProblems p -> c.getProblems(p.project(), p.severity());
             case Request.Build b -> c.build(b.project(), b.kind());
             case Request.GetQuickFixes q -> c.getQuickFixes(q.file(), q.line());
@@ -79,6 +85,9 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
             case Request.ListLaunches _ -> c.listLaunches();
             case Request.ListSessions _ -> c.listSessions();
             case Request.Terminate _ -> c.terminate();
+            case Request.FindReferences f -> navigation.findReferences(f.file(), f.offset());
+            case Request.CallHierarchy ch -> navigation.callHierarchy(ch.file(), ch.offset(), ch.direction(), ch.depth());
+            case Request.TypeHierarchy th -> navigation.typeHierarchy(th.file(), th.offset());
             default -> throw new IllegalArgumentException(
                 "DebugCommandHandler: no handler for " + req.getClass().getSimpleName());
         };
