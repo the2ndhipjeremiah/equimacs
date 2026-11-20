@@ -386,7 +386,8 @@ public class Build {
                 mainSrc.resolve("LogpointTemplate.java").toString(),
                 mainSrc.resolve("ExecutionTraceStore.java").toString(),
                 mainSrc.resolve("JUnitTraceParser.java").toString(),
-                mainSrc.resolve("JUnitTestStore.java").toString()));
+                mainSrc.resolve("JUnitTestStore.java").toString(),
+                mainSrc.resolve("ConsoleOutputStore.java").toString()));
             try (Stream<Path> s = Files.walk(testSrc)) {
                 s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
             }

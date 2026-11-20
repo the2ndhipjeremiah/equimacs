@@ -73,6 +73,8 @@ final class BridgeProtocol {
             case "OpenFile" -> Request.OpenFile.class;
             case "RunTests" -> Request.RunTests.class;
             case "GetTestResults" -> Request.GetTestResults.class;
+            case "GetConsoleOutput" -> Request.GetConsoleOutput.class;
+            case "ClearConsoleOutput" -> Request.ClearConsoleOutput.class;
             default -> throw new JsonParseException("Unknown request type: " + type);
         };
     }

@@ -149,6 +149,8 @@ eqm-cli type-hierarchy <file>:<offset>
 eqm-cli open-file <file>[:<line>[-<endLine>]]
 eqm-cli run-tests <project> [class[#method]] [--mode run|debug] [--runner junit5|junit6|junit4|junit3] [--wait true|false] [--no-wait] [--timeout <ms>]
 eqm-cli test-results [runId] [--failures]
+eqm-cli console [launchName] [--launch <name>] [--stream all|stdout|stderr] [--limit <n>]
+eqm-cli console-clear
 eqm-cli shutdown
 eqm-cli --schema
 ```

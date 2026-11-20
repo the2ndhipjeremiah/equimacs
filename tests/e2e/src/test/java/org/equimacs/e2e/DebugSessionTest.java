@@ -35,6 +35,7 @@ class DebugSessionTest {
         harness.rpc().request(new Request.Terminate());
         harness.rpc().request(new Request.ClearAllBreakpoints());
         harness.rpc().request(new Request.ClearTrace());
+        harness.rpc().request(new Request.ClearConsoleOutput());
         harness.rpc().request(new Request.RefreshProject("hello-java"));
         drainEvents();
     }
@@ -259,6 +260,48 @@ class DebugSessionTest {
         assertEquals("even i=4", lpHits.get(1).get("message").getAsString(), () -> lpHits.get(1).toString());
         assertFalse(lpHits.get(0).has("variables"), () -> lpHits.get(0).toString());
         assertFalse(lpHits.get(1).has("variables"), () -> lpHits.get(1).toString());
+    }
+
+    @Test
+    void consoleCapturesStdoutFromLaunchedProcess() throws Exception {
+        JsonObject cleared = harness.rpc().request(new Request.ClearConsoleOutput());
+        assertTrue(cleared.has("result"), cleared::toString);
+
+        JsonObject launch = harness.rpc().request(new Request.Launch("Hello"));
+        assertTrue(launch.has("result"), launch::toString);
+        assertEquals("launched: Hello", launch.get("result").getAsString());
+
+        waitForEvent("Terminated");
+
+        long deadline = System.nanoTime() + 3_000_000_000L;
+        JsonObject page = null;
+        String text = "";
+        while (System.nanoTime() < deadline) {
+            JsonObject resp = harness.rpc().request(new Request.GetConsoleOutput("Hello", "stdout", 50));
+            assertTrue(resp.has("result"), resp::toString);
+            page = resp.getAsJsonObject("result");
+            text = page.get("text").getAsString();
+            if (text.contains("hello 42")) {
+                break;
+            }
+            Thread.sleep(50);
+        }
+        JsonObject capturedPage = page;
+        assertTrue(text.contains("hello 42"), () -> "Expected captured stdout 'hello 42', got: " + capturedPage);
+        assertTrue(capturedPage.get("count").getAsInt() >= 1, capturedPage::toString);
+        JsonArray entries = capturedPage.getAsJsonArray("entries");
+        assertFalse(entries.isEmpty(), capturedPage::toString);
+        JsonObject first = entries.get(0).getAsJsonObject();
+        assertEquals("Hello", first.get("launch").getAsString(), first::toString);
+        assertEquals("stdout", first.get("stream").getAsString(), first::toString);
+
+        JsonObject clearAfter = harness.rpc().request(new Request.ClearConsoleOutput());
+        assertTrue(clearAfter.has("result"), clearAfter::toString);
+        JsonObject emptyResp = harness.rpc().request(new Request.GetConsoleOutput("Hello", "all", 50));
+        assertTrue(emptyResp.has("result"), emptyResp::toString);
+        JsonObject emptyPage = emptyResp.getAsJsonObject("result");
+        assertEquals(0, emptyPage.get("count").getAsInt(), emptyPage::toString);
+        assertEquals("", emptyPage.get("text").getAsString(), emptyPage::toString);
     }
 
     private static List<JsonObject> collectEventsUntil(String stopEvent, String forbiddenEvent) throws Exception {

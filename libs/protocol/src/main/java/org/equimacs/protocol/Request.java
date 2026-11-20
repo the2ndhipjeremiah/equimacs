@@ -93,6 +93,10 @@ public sealed interface Request {
     ) implements Request {}
     record GetTestResults(String runId, Boolean failuresOnly) implements Request {}
 
+    // --- Console Output ---
+    record GetConsoleOutput(String launchName, String stream, int limit) implements Request {}
+    record ClearConsoleOutput() implements Request {}
+
     /**
      * Types of stepping available.
      */

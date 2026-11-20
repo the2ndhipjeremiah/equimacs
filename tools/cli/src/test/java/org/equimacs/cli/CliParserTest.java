@@ -2,6 +2,7 @@ package org.equimacs.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.equimacs.cli.util.CliArgs;
 import org.equimacs.protocol.Request;
@@ -236,6 +237,25 @@ class CliParserTest {
         assertEquals(
             new Request.GetTestResults("test_3", Boolean.TRUE),
             parse("test-results", "--failures-only", "true", "test_3"));
+    }
+
+    @Test
+    void parsesConsoleCommands() {
+        assertEquals(
+            new Request.GetConsoleOutput(null, "all", 200),
+            parse("console"));
+        assertEquals(
+            new Request.GetConsoleOutput("Main", "all", 200),
+            parse("console", "Main"));
+        assertEquals(
+            new Request.GetConsoleOutput("Main", "stderr", 50),
+            parse("console", "-l", "Main", "--stream", "stderr", "-n", "50"));
+        assertEquals(
+            new Request.GetConsoleOutput(null, "stdout", 10),
+            parse("console", "-s", "out", "--limit", "10"));
+        assertThrows(CliParseException.class, () -> parse("console", "--stream", "invalid"));
+        assertThrows(CliParseException.class, () -> parse("console", "--limit", "0"));
+        assertEquals(new Request.ClearConsoleOutput(), parse("console-clear"));
     }
 
     private static Request parse(String... args) {

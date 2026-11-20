@@ -268,6 +268,20 @@ public class ProtocolSchema {
             "runId": { "type": "string", "optional": true, "description": "Test run id (defaults to most recent run)" },
             "failuresOnly": { "type": "boolean", "optional": true, "default": false }
           }
+        },
+        "console": {
+          "description": "Read captured stdout/stderr console output from launched processes",
+          "record": "GetConsoleOutput",
+          "params": {
+            "launchName": { "type": "string", "optional": true, "description": "Filter by launch configuration name" },
+            "stream": { "type": "string", "optional": true, "enum": ["all", "stdout", "stderr"], "default": "all" },
+            "limit": { "type": "integer", "optional": true, "default": 200 }
+          }
+        },
+        "console-clear": {
+          "description": "Clear captured console output buffer",
+          "record": "ClearConsoleOutput",
+          "params": {}
         }
       },
       "responses": {

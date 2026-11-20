@@ -8,7 +8,8 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
 
     private volatile JavaDebugController controller;
     private volatile JUnitTestRunnerService testRunner;
-    private final JavaNavigationService navigation = new JavaNavigationService();
+    private volatile JavaNavigationService navigation;
+    private volatile ConsoleCaptureService console;
     private volatile IBridgeService bridge;
 
     void setBridge(IBridgeService bridge) {
@@ -35,11 +36,18 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
         if (tr != null) {
             tr.dispose();
         }
+        ConsoleCaptureService cs = console;
+        console = null;
+        if (cs != null) {
+            cs.dispose();
+        }
+        navigation = null;
     }
 
     @Override
     public Object handle(Request req) throws Exception {
         JavaDebugController c = controller();
+        console();
         return switch (req) {
             case Request.SetBreakpoint b -> {
                 c.setBreakpoint(b.path(), b.line(), b.condition());
@@ -91,12 +99,14 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
             case Request.ListLaunches _ -> c.listLaunches();
             case Request.ListSessions _ -> c.listSessions();
             case Request.Terminate _ -> c.terminate();
-            case Request.FindReferences f -> navigation.findReferences(f.file(), f.offset());
-            case Request.CallHierarchy ch -> navigation.callHierarchy(ch.file(), ch.offset(), ch.direction(), ch.depth());
-            case Request.TypeHierarchy th -> navigation.typeHierarchy(th.file(), th.offset());
+            case Request.FindReferences f -> navigation().findReferences(f.file(), f.offset());
+            case Request.CallHierarchy ch -> navigation().callHierarchy(ch.file(), ch.offset(), ch.direction(), ch.depth());
+            case Request.TypeHierarchy th -> navigation().typeHierarchy(th.file(), th.offset());
             case Request.RunTests rt -> testRunner().runTests(
                 rt.project(), rt.className(), rt.methodName(), rt.mode(), rt.runner(), rt.await(), rt.timeoutMs());
             case Request.GetTestResults tr -> testRunner().getTestResults(tr.runId(), tr.failuresOnly());
+            case Request.GetConsoleOutput co -> console().getConsoleOutput(co.launchName(), co.stream(), co.limit());
+            case Request.ClearConsoleOutput _ -> console().clearConsoleOutput();
             default -> throw new IllegalArgumentException(
                 "DebugCommandHandler: no handler for " + req.getClass().getSimpleName());
         };
@@ -139,6 +149,36 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
                 testRunner = tr;
             }
             return tr;
+        }
+    }
+
+    private JavaNavigationService navigation() {
+        JavaNavigationService nav = navigation;
+        if (nav != null) {
+            return nav;
+        }
+        synchronized (this) {
+            nav = navigation;
+            if (nav == null) {
+                nav = new JavaNavigationService();
+                navigation = nav;
+            }
+            return nav;
+        }
+    }
+
+    private ConsoleCaptureService console() {
+        ConsoleCaptureService cs = console;
+        if (cs != null) {
+            return cs;
+        }
+        synchronized (this) {
+            cs = console;
+            if (cs == null) {
+                cs = new ConsoleCaptureService();
+                console = cs;
+            }
+            return cs;
         }
     }
 }

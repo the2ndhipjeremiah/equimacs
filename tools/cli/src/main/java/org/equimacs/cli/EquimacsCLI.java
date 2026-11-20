@@ -13,6 +13,7 @@ import java.nio.channels.Channels;
 import java.nio.channels.SocketChannel;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import org.equimacs.protocol.Request;
 import org.equimacs.protocol.Response;
 import org.equimacs.protocol.ProtocolSchema;
@@ -355,6 +356,31 @@ public class EquimacsCLI {
                     }
                     yield new Request.GetTestResults(runId, failuresOnly);
                 }
+                case "console" -> {
+                    String launchName = cli.getOption("launch", "l");
+                    if (launchName == null && args.size() > 1) {
+                        launchName = args.get(1);
+                    }
+                    String streamOpt = cli.getOption("stream", "s");
+                    String stream = "all";
+                    if (streamOpt != null) {
+                        String normalized = streamOpt.trim().toLowerCase(Locale.ROOT);
+                        stream = switch (normalized) {
+                            case "all" -> "all";
+                            case "stdout", "out" -> "stdout";
+                            case "stderr", "err" -> "stderr";
+                            default -> throw new CliParseException(
+                                "Invalid --stream value (expected all, stdout, or stderr): " + streamOpt);
+                        };
+                    }
+                    String limitStr = cli.getOption("limit", "n");
+                    int limit = limitStr != null ? Integer.parseInt(limitStr) : 200;
+                    if (limit <= 0) {
+                        throw new CliParseException("Invalid --limit value (must be > 0): " + limitStr);
+                    }
+                    yield new Request.GetConsoleOutput(launchName, stream, limit);
+                }
+                case "console-clear" -> new Request.ClearConsoleOutput();
                 case "review-add" -> {
                     if (args.size() < 3) throw new CliParseException("Usage: review-add <file>:<line> <text...> [--author <name>]");
                     String spec = args.get(1);
