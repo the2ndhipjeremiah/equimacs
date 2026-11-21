@@ -258,6 +258,37 @@ class CliParserTest {
         assertEquals(new Request.ClearConsoleOutput(), parse("console-clear"));
     }
 
+    @Test
+    void parsesEclipseCommand() {
+        assertEquals(
+            new Request.EclipseCommand("org.eclipse.jdt.ui.edit.text.java.open.call.hierarchy", null, -1, null),
+            parse("eclipse-command", "org.eclipse.jdt.ui.edit.text.java.open.call.hierarchy"));
+        assertEquals(
+            new Request.EclipseCommand("org.eclipse.jdt.ui.edit.text.java.open.call.hierarchy", "/toy-app/src/toy/Pipeline.java", 531, null),
+            parse("eclipse-command", "org.eclipse.jdt.ui.edit.text.java.open.call.hierarchy", "/toy-app/src/toy/Pipeline.java:531"));
+        assertEquals(
+            new Request.EclipseCommand(
+                "org.eclipse.ui.views.showView",
+                null,
+                -1,
+                java.util.Map.of("org.eclipse.ui.views.showView.viewId", "org.equimacs.eclipse.ui.reviewView")),
+            parse(
+                "eclipse-command",
+                "org.eclipse.ui.views.showView",
+                "--params",
+                "{\"org.eclipse.ui.views.showView.viewId\":\"org.equimacs.eclipse.ui.reviewView\"}"));
+    }
+
+    @Test
+    void parsesShowView() {
+        assertEquals(
+            new Request.ShowView("org.equimacs.eclipse.ui.reviewView", null),
+            parse("show-view", "org.equimacs.eclipse.ui.reviewView"));
+        assertEquals(
+            new Request.ShowView("org.eclipse.ui.console.ConsoleView", "sec1"),
+            parse("show-view", "org.eclipse.ui.console.ConsoleView", "sec1"));
+    }
+
     private static Request parse(String... args) {
         return EquimacsCLI.parseCommand(CliArgs.parse(args));
     }

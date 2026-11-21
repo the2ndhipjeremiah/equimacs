@@ -409,6 +409,38 @@ public class EquimacsCLI {
                 case "review-diagnostics" -> new Request.ReviewDiagnostics(args.size() > 1 ? args.get(1) : null);
                 case "eclipse-workbench" -> new Request.EclipseWorkbench();
                 case "eclipse-editor-diagnostics" -> new Request.EclipseEditorDiagnostics();
+                case "eclipse-command" -> {
+                    if (args.size() < 2) {
+                        throw new CliParseException("Usage: eclipse-command <commandId> [<file>:<offset>] [--params <json>]");
+                    }
+                    String commandId = args.get(1);
+                    String paramsJson = cli.getOption("params", "p");
+                    java.util.Map<String, String> params = null;
+                    if (paramsJson != null && !paramsJson.isBlank()) {
+                        params = gson.fromJson(
+                            paramsJson,
+                            new com.google.gson.reflect.TypeToken<java.util.Map<String, String>>() {}.getType());
+                    }
+                    if (args.size() < 3) {
+                        yield new Request.EclipseCommand(commandId, null, -1, params);
+                    }
+                    String spec = args.get(2);
+                    int lastColon = spec.lastIndexOf(':');
+                    if (lastColon <= 1) {
+                        yield new Request.EclipseCommand(commandId, spec, -1, params);
+                    }
+                    yield new Request.EclipseCommand(
+                        commandId,
+                        spec.substring(0, lastColon),
+                        Integer.parseInt(spec.substring(lastColon + 1)),
+                        params);
+                }
+                case "show-view" -> {
+                    if (args.size() < 2) {
+                        throw new CliParseException("Usage: show-view <viewId> [secondaryId]");
+                    }
+                    yield new Request.ShowView(args.get(1), args.size() > 2 ? args.get(2) : null);
+                }
                 case "review-editor-diagnostics" -> {
                     if (args.size() < 2) {
                         yield new Request.ReviewEditorDiagnostics(null, -1);

@@ -141,6 +141,8 @@ eqm-cli review-resolve <commentId>
 eqm-cli review-diagnostics [file]
 eqm-cli eclipse-workbench
 eqm-cli eclipse-editor-diagnostics
+eqm-cli eclipse-command <commandId> [<file>:<offset>] [--params <json>]
+eqm-cli show-view <viewId> [secondaryId]
 eqm-cli review-editor-diagnostics [file[:line]]
 eqm-cli custom <target> <action> [argsJson | --args <json>]
 eqm-cli find-refs <file>:<offset>

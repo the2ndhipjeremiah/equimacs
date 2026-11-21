@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicReference;
+import org.eclipse.core.commands.Command;
+import org.eclipse.core.commands.ParameterizedCommand;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IResource;
@@ -25,11 +27,14 @@ import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IFileEditorInput;
 import org.eclipse.ui.IPerspectiveDescriptor;
+import org.eclipse.ui.IViewPart;
 import org.eclipse.ui.IWorkbench;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.IWorkbenchWindow;
 import org.eclipse.ui.PlatformUI;
+import org.eclipse.ui.commands.ICommandService;
 import org.eclipse.ui.editors.text.EditorsUI;
+import org.eclipse.ui.handlers.IHandlerService;
 import org.eclipse.ui.texteditor.IDocumentProvider;
 import org.eclipse.ui.texteditor.ITextEditor;
 import org.eclipse.ui.texteditor.MarkerAnnotation;
@@ -115,6 +120,8 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
             case Request.EclipseEditorDiagnostics _ -> eclipseEditorDiagnostics();
             case Request.ReviewEditorDiagnostics r -> reviewEditorDiagnostics(r.file(), r.line());
             case Request.OpenFile o -> openFile(o.file(), o.line(), o.endLine());
+            case Request.EclipseCommand ec -> eclipseCommand(ec.commandId(), ec.file(), ec.offset(), ec.params());
+            case Request.ShowView sv -> showView(sv.viewId(), sv.secondaryId());
             default -> throw new IllegalArgumentException(
                 "ReviewCommandHandler: no handler for " + req.getClass().getSimpleName());
         };
@@ -189,6 +196,103 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
                 return result;
             } catch (Exception e) {
                 throw new IllegalStateException("Failed to open editor: " + e.getMessage(), e);
+            }
+        });
+    }
+
+    private Map<String, Object> eclipseCommand(
+        String commandId,
+        String filePath,
+        int offset,
+        Map<String, String> params
+    ) {
+        if (commandId == null || commandId.isBlank()) {
+            throw new IllegalArgumentException("EclipseCommand requires a non-blank commandId");
+        }
+        String trimmedCommandId = commandId.trim();
+        IFile resolvedFile = (filePath != null && !filePath.isBlank()) ? resolveWorkspaceFile(filePath) : null;
+        if (filePath != null && !filePath.isBlank() && resolvedFile == null) {
+            throw new IllegalArgumentException("File not found in workspace: " + filePath);
+        }
+        return uiRead(() -> {
+            if (!PlatformUI.isWorkbenchRunning()) {
+                throw new IllegalStateException("Eclipse workbench is not running");
+            }
+            WorkbenchState state = activeWorkbenchState();
+            try {
+                if (resolvedFile != null) {
+                    if (state.page == null) {
+                        throw new IllegalStateException("No active Eclipse workbench page");
+                    }
+                    IEditorPart editor = org.eclipse.ui.ide.IDE.openEditor(state.page, resolvedFile, true);
+                    if (offset >= 0 && editor instanceof ITextEditor textEditor) {
+                        textEditor.selectAndReveal(offset, 0);
+                    }
+                }
+                IHandlerService handlerService = state.window != null
+                    ? state.window.getService(IHandlerService.class)
+                    : PlatformUI.getWorkbench().getService(IHandlerService.class);
+                if (handlerService == null) {
+                    throw new IllegalStateException("Eclipse IHandlerService unavailable");
+                }
+                if (params != null && !params.isEmpty()) {
+                    ICommandService commandService = state.window != null
+                        ? state.window.getService(ICommandService.class)
+                        : PlatformUI.getWorkbench().getService(ICommandService.class);
+                    if (commandService == null) {
+                        throw new IllegalStateException("Eclipse ICommandService unavailable");
+                    }
+                    Command command = commandService.getCommand(trimmedCommandId);
+                    ParameterizedCommand parameterized = ParameterizedCommand.generateCommand(command, params);
+                    if (parameterized == null) {
+                        throw new IllegalArgumentException(
+                            "Failed to parameterize command " + trimmedCommandId + " with " + params);
+                    }
+                    handlerService.executeCommand(parameterized, null);
+                } else {
+                    handlerService.executeCommand(trimmedCommandId, null);
+                }
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("executed", true);
+                result.put("commandId", trimmedCommandId);
+                result.put("file", resolvedFile != null ? resolvedFile.getFullPath().toString() : null);
+                result.put("offset", offset);
+                result.put("params", params);
+                return result;
+            } catch (Exception e) {
+                throw new IllegalStateException(
+                    "Failed to execute Eclipse command " + trimmedCommandId + ": " + e.getMessage(), e);
+            }
+        });
+    }
+
+    private Map<String, Object> showView(String viewId, String secondaryId) {
+        if (viewId == null || viewId.isBlank()) {
+            throw new IllegalArgumentException("ShowView requires a non-blank viewId");
+        }
+        String trimmedViewId = viewId.trim();
+        String trimmedSecondary = (secondaryId != null && !secondaryId.isBlank()) ? secondaryId.trim() : null;
+        return uiRead(() -> {
+            if (!PlatformUI.isWorkbenchRunning()) {
+                throw new IllegalStateException("Eclipse workbench is not running");
+            }
+            WorkbenchState state = activeWorkbenchState();
+            if (state.page == null) {
+                throw new IllegalStateException("No active Eclipse workbench page");
+            }
+            try {
+                IViewPart view = trimmedSecondary != null
+                    ? state.page.showView(trimmedViewId, trimmedSecondary, IWorkbenchPage.VIEW_ACTIVATE)
+                    : state.page.showView(trimmedViewId);
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("shown", true);
+                result.put("viewId", trimmedViewId);
+                result.put("secondaryId", trimmedSecondary);
+                result.put("title", view != null ? view.getTitle() : null);
+                return result;
+            } catch (Exception e) {
+                throw new IllegalStateException(
+                    "Failed to show view " + trimmedViewId + ": " + e.getMessage(), e);
             }
         });
     }

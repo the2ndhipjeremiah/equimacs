@@ -75,6 +75,8 @@ final class BridgeProtocol {
             case "GetTestResults" -> Request.GetTestResults.class;
             case "GetConsoleOutput" -> Request.GetConsoleOutput.class;
             case "ClearConsoleOutput" -> Request.ClearConsoleOutput.class;
+            case "EclipseCommand" -> Request.EclipseCommand.class;
+            case "ShowView" -> Request.ShowView.class;
             default -> throw new JsonParseException("Unknown request type: " + type);
         };
     }

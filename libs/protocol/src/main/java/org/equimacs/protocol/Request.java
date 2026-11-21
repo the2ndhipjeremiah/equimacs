@@ -97,6 +97,10 @@ public sealed interface Request {
     record GetConsoleOutput(String launchName, String stream, int limit) implements Request {}
     record ClearConsoleOutput() implements Request {}
 
+    // --- UI Workbench Commands ---
+    record EclipseCommand(String commandId, String file, int offset, java.util.Map<String, String> params) implements Request {}
+    record ShowView(String viewId, String secondaryId) implements Request {}
+
     /**
      * Types of stepping available.
      */

@@ -282,6 +282,24 @@ public class ProtocolSchema {
           "description": "Clear captured console output buffer",
           "record": "ClearConsoleOutput",
           "params": {}
+        },
+        "eclipse-command": {
+          "description": "Execute an Eclipse workbench command ID, optionally opening file:offset first",
+          "record": "EclipseCommand",
+          "params": {
+            "commandId": { "type": "string", "description": "Eclipse workbench command ID" },
+            "file": { "type": "string", "optional": true, "description": "Optional file path to open before running the command" },
+            "offset": { "type": "integer", "optional": true, "default": -1, "description": "Optional character offset to select" },
+            "params": { "type": "object", "optional": true, "description": "Optional key/value parameters for parameterized Eclipse commands" }
+          }
+        },
+        "show-view": {
+          "description": "Open and activate an Eclipse workbench view by ID",
+          "record": "ShowView",
+          "params": {
+            "viewId": { "type": "string", "description": "Eclipse view ID (e.g. org.equimacs.eclipse.ui.reviewView)" },
+            "secondaryId": { "type": "string", "optional": true, "description": "Optional secondary view ID for multi-instance views" }
+          }
         }
       },
       "responses": {
