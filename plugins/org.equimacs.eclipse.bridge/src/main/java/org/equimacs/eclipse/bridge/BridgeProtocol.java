@@ -3,11 +3,15 @@ package org.equimacs.eclipse.bridge;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonDeserializer;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
 import org.equimacs.protocol.Request;
 
-final class BridgeProtocol {
+public final class BridgeProtocol {
+    private static final Gson GSON = createGson();
+
     private BridgeProtocol() {}
 
     static Gson createGson() {
@@ -20,6 +24,27 @@ final class BridgeProtocol {
                 return context.deserialize(obj, requestClassFor(obj.get("type").getAsString()));
             })
             .create();
+    }
+
+    /**
+     * Deserializes a typed {@link Request} from a request type name and JSON object parameter payload.
+     */
+    public static Request deserializeTyped(String requestType, String paramsJson) {
+        if (requestType == null || requestType.isBlank()) {
+            throw new IllegalArgumentException("requestType must not be blank");
+        }
+        JsonObject obj;
+        if (paramsJson == null || paramsJson.isBlank()) {
+            obj = new JsonObject();
+        } else {
+            JsonElement parsed = JsonParser.parseString(paramsJson);
+            if (!parsed.isJsonObject()) {
+                throw new IllegalArgumentException("paramsJson must be a JSON object");
+            }
+            obj = parsed.getAsJsonObject().deepCopy();
+        }
+        obj.addProperty("type", requestType.trim());
+        return GSON.fromJson(obj, Request.class);
     }
 
     private static Class<? extends Request> requestClassFor(String type) {
@@ -77,6 +102,20 @@ final class BridgeProtocol {
             case "ClearConsoleOutput" -> Request.ClearConsoleOutput.class;
             case "EclipseCommand" -> Request.EclipseCommand.class;
             case "ShowView" -> Request.ShowView.class;
+            case "UiTree" -> Request.UiTree.class;
+            case "UiClick" -> Request.UiClick.class;
+            case "UiType" -> Request.UiType.class;
+            case "ViewOpen" -> Request.ViewOpen.class;
+            case "ViewUpdate" -> Request.ViewUpdate.class;
+            case "ViewClose" -> Request.ViewClose.class;
+            case "ViewList" -> Request.ViewList.class;
+            case "InspectFrame" -> Request.InspectFrame.class;
+            case "InspectValue" -> Request.InspectValue.class;
+            case "InspectSymbol" -> Request.InspectSymbol.class;
+            case "ListInspectProviders" -> Request.ListInspectProviders.class;
+            case "OpenCallExplorer" -> Request.OpenCallExplorer.class;
+            case "OpenTraceView" -> Request.OpenTraceView.class;
+            case "OpenJUnitView" -> Request.OpenJUnitView.class;
             default -> throw new JsonParseException("Unknown request type: " + type);
         };
     }

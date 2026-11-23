@@ -44,6 +44,8 @@ public class Build {
                 runCliTests();
                 buildDebugUnitTests();
                 runDebugUnitTests();
+                buildUiUnitTests();
+                runUiUnitTests();
                 System.out.println(">>> Tests Successful");
                 return;
             }
@@ -371,6 +373,7 @@ public class Build {
 
     private static void buildDebugUnitTests() throws Exception {
         step("debug-unit-tests", () -> {
+            Path bridgeApiSrc = ROOT.resolve("plugins/org.equimacs.eclipse.bridge/src/main/java/org/equimacs/eclipse/bridge/api");
             Path debugDir = ROOT.resolve("plugins/org.equimacs.debug");
             Path mainSrc = debugDir.resolve("src/main/java/org/equimacs/debug");
             Path testSrc = debugDir.resolve("src/test/java");
@@ -378,16 +381,23 @@ public class Build {
             if (Files.exists(out)) deleteDir(out);
             Files.createDirectories(out);
 
+            String cp = getLib("gson")
+                + File.pathSeparator + getLib("junit-platform-console-standalone");
             List<String> javacCmd = new ArrayList<>(List.of(
                 getJavac(),
-                "-cp", getLib("junit-platform-console-standalone"),
+                "-cp", cp,
                 "-d", out.toString(),
                 "--release", "26",
+                bridgeApiSrc.resolve("InspectContext.java").toString(),
+                bridgeApiSrc.resolve("MoldableTab.java").toString(),
+                bridgeApiSrc.resolve("IMoldableViewProvider.java").toString(),
                 mainSrc.resolve("LogpointTemplate.java").toString(),
                 mainSrc.resolve("ExecutionTraceStore.java").toString(),
                 mainSrc.resolve("JUnitTraceParser.java").toString(),
                 mainSrc.resolve("JUnitTestStore.java").toString(),
-                mainSrc.resolve("ConsoleOutputStore.java").toString()));
+                mainSrc.resolve("ConsoleOutputStore.java").toString(),
+                mainSrc.resolve("MoldableInspectorCore.java").toString(),
+                mainSrc.resolve("BuiltInInspectProviders.java").toString()));
             try (Stream<Path> s = Files.walk(testSrc)) {
                 s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
             }
@@ -397,7 +407,66 @@ public class Build {
 
     private static void runDebugUnitTests() throws Exception {
         step("debug-unit-test", () -> {
-            String cp = ROOT.resolve("plugins/org.equimacs.debug/build/test-classes").toString();
+            String cp = ROOT.resolve("plugins/org.equimacs.debug/build/test-classes")
+                + File.pathSeparator + getLib("gson");
+
+            runProcess(List.of(getJava(),
+                "-jar", getLib("junit-platform-console-standalone"),
+                "execute",
+                "--class-path", cp,
+                "--scan-class-path"));
+        });
+    }
+
+    private static void buildUiUnitTests() throws Exception {
+        step("ui-unit-tests", () -> {
+            Path uiDir = ROOT.resolve("plugins/org.equimacs.eclipse.ui");
+            Path mainSrc = uiDir.resolve("src/main/java");
+            Path testSrc = uiDir.resolve("src/test/java");
+            Path out = uiDir.resolve("build/test-classes");
+            if (Files.exists(out)) deleteDir(out);
+            Files.createDirectories(out);
+
+            String cp = getLib("gson")
+                + File.pathSeparator + getLib("junit-platform-console-standalone");
+            List<String> javacCmd = new ArrayList<>(List.of(
+                getJavac(),
+                "-cp", cp,
+                "-d", out.toString(),
+                "--release", "26",
+                mainSrc.resolve("org/equimacs/eclipse/ui/inspect/UiNode.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/inspect/UiTreeCore.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/viewhost/ViewAction.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/viewhost/ViewSpec.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/viewhost/LiveBinding.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/viewhost/ViewSpecParser.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/viewhost/HtmlBridgeInjector.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/viewhost/FormSpecSupport.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/viewhost/LiveViewRefreshCoordinator.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/viewhost/GraphLayoutCore.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/viewhost/MarkdownStyler.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/viewhost/ViewHostStore.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/toolkit/CallExplorerSpecBuilder.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/toolkit/ExecutionTraceSpecBuilder.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/toolkit/JUnitViewSpecBuilder.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/review/LineAnchor.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/review/LineAnchorMatcher.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/review/GitDiffModel.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/review/GitDiffParser.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/review/ReviewComment.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/review/ReviewStoreCore.java").toString(),
+                mainSrc.resolve("org/equimacs/eclipse/ui/review/EditorHighlightCore.java").toString()));
+            try (Stream<Path> s = Files.walk(testSrc)) {
+                s.filter(p -> p.toString().endsWith(".java")).forEach(p -> javacCmd.add(p.toString()));
+            }
+            runProcess(javacCmd);
+        });
+    }
+
+    private static void runUiUnitTests() throws Exception {
+        step("ui-unit-test", () -> {
+            String cp = ROOT.resolve("plugins/org.equimacs.eclipse.ui/build/test-classes")
+                + File.pathSeparator + getLib("gson");
 
             runProcess(List.of(getJava(),
                 "-jar", getLib("junit-platform-console-standalone"),
@@ -697,7 +766,7 @@ public class Build {
             "org.eclipse.equinox.app_", "org.eclipse.jdt.core.manipulation_",
             "org.eclipse.ltk.core.refactoring_", "org.eclipse.text_", "org.eclipse.jface.text_",
             "org.eclipse.ui.workbench.texteditor_", "org.eclipse.ui.editors_",
-            "org.eclipse.core.filebuffers_" };
+            "org.eclipse.core.filebuffers_", "org.eclipse.e4.ui.model.workbench_" };
         
         List<String> found = new ArrayList<>();
         try (Stream<Path> stream = Files.list(plugins)) {

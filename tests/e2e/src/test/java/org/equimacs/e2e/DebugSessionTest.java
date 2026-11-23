@@ -142,6 +142,45 @@ class DebugSessionTest {
     }
 
     @Test
+    void inspectFrameAndValueAtBreakpoint() throws Exception {
+        JsonObject event = launchToBreakpoint(5);
+        long threadId = event.get("threadId").getAsLong();
+
+        JsonObject threadsResponse = harness.rpc().request(new Request.GetThreads());
+        assertTrue(threadsResponse.has("result"), threadsResponse::toString);
+        assertTrue(hasSuspendedThread(threadsResponse.getAsJsonArray("result"), threadId), threadsResponse::toString);
+
+        JsonObject stackResponse = harness.rpc().request(new Request.GetStack(threadId));
+        assertTrue(stackResponse.has("result"), stackResponse::toString);
+        long frameId = stackResponse.getAsJsonArray("result").get(0).getAsJsonObject().get("id").getAsLong();
+
+        JsonObject frameResp = harness.rpc().request(new Request.InspectFrame(frameId, Boolean.FALSE, null));
+        assertTrue(frameResp.has("result"), frameResp::toString);
+        JsonObject frameResult = frameResp.getAsJsonObject("result");
+        assertEquals("jdi-frame", frameResult.get("targetKind").getAsString(), frameResp::toString);
+        assertEquals("tabs", frameResult.getAsJsonObject("spec").get("kind").getAsString(), frameResp::toString);
+        List<String> frameTabs = extractTabIds(frameResult.getAsJsonArray("tabs"));
+        assertTrue(frameTabs.contains("overview"), frameResp::toString);
+        assertTrue(frameTabs.contains("variables"), frameResp::toString);
+        assertTrue(frameTabs.contains("evaluate"), frameResp::toString);
+
+        JsonObject jsonValResp = harness.rpc().request(
+            new Request.InspectValue(frameId, "\"{\\\"k\\\":1}\"", 2, Boolean.FALSE, null));
+        assertTrue(jsonValResp.has("result"), jsonValResp::toString);
+        JsonObject jsonValResult = jsonValResp.getAsJsonObject("result");
+        assertEquals("jdi-value", jsonValResult.get("targetKind").getAsString(), jsonValResp::toString);
+        List<String> jsonTabs = extractTabIds(jsonValResult.getAsJsonArray("tabs"));
+        assertTrue(jsonTabs.contains("overview"), jsonValResp::toString);
+        assertTrue(jsonTabs.contains("text"), jsonValResp::toString);
+        assertTrue(jsonTabs.contains("json"), jsonValResp::toString);
+
+        JsonObject varResp = harness.rpc().request(
+            new Request.InspectValue(frameId, "next", 2, Boolean.FALSE, null));
+        assertTrue(varResp.has("result"), varResp::toString);
+        assertEquals("jdi-value", varResp.getAsJsonObject("result").get("targetKind").getAsString(), varResp::toString);
+    }
+
+    @Test
     void logpointStreamsNonBlockingTraceAndSnapshot() throws Exception {
         JsonObject setLp = harness.rpc().request(new Request.SetLogpoint(
             "/hello-java/src/TraceLoop.java",
@@ -408,5 +447,13 @@ class DebugSessionTest {
             }
         }
         return false;
+    }
+
+    private static List<String> extractTabIds(JsonArray tabs) {
+        List<String> ids = new ArrayList<>();
+        for (JsonElement element : tabs) {
+            ids.add(element.getAsJsonObject().get("id").getAsString());
+        }
+        return ids;
     }
 }

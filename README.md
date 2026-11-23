@@ -135,7 +135,7 @@ eqm-cli list-launches
 eqm-cli sessions
 eqm-cli terminate
 eqm-cli review-add <file>:<line> <text...> [--author <name>]
-eqm-cli review-list [file]
+eqm-cli review-list [file] [--changed-files | --changed-hunks | --filter all|changed-files|changed-hunks]
 eqm-cli review-reply <commentId> <text...> [--author <name>]
 eqm-cli review-resolve <commentId>
 eqm-cli review-diagnostics [file]
@@ -143,6 +143,20 @@ eqm-cli eclipse-workbench
 eqm-cli eclipse-editor-diagnostics
 eqm-cli eclipse-command <commandId> [<file>:<offset>] [--params <json>]
 eqm-cli show-view <viewId> [secondaryId]
+eqm-cli ui-tree [--root active|all|dialog|editor|view:<viewId>] [--depth <n>] [--all] [--filter <text>] [--type <widgetType>]
+eqm-cli ui-click [widgetId] [--id <widgetId>] [--root <scope>] [--type <widgetType>] [--text <label>] [--index <n>] [--item <itemText>] [--double-click]
+eqm-cli ui-type <widgetId> <value...> [--append] [--submit]
+eqm-cli view-open <viewId> [specJson] [--title <title>] [--spec <json>] [--spec-file <path>]
+eqm-cli view-update <viewId> [specJson] [--title <title>] [--spec <json>] [--spec-file <path>]
+eqm-cli view-close <viewId>
+eqm-cli view-list
+eqm-cli inspect-frame <frameId> [--open true|false | --no-open] [--view-id <id>]
+eqm-cli inspect-value <frameId> <expression...> [--expr <expr>] [--depth <n>] [--open true|false | --no-open] [--view-id <id>]
+eqm-cli inspect-symbol <file>:<offset> [--open true|false | --no-open] [--view-id <id>]
+eqm-cli inspect-providers
+eqm-cli call-explorer <file>:<offset> [--direction callers|callees|both] [--depth <n>] [--hide-jdk true|false | --show-jdk] [--mode tree|hybrid] [--view-id <id>]
+eqm-cli trace-view [--limit <n>] [--live true|false | --no-live] [--view-id <id>]
+eqm-cli junit-view [runId] [--failures | --failures-only true|false] [--live true|false | --no-live] [--view-id <id>]
 eqm-cli review-editor-diagnostics [file[:line]]
 eqm-cli custom <target> <action> [argsJson | --args <json>]
 eqm-cli find-refs <file>:<offset>
@@ -216,6 +230,35 @@ eqm-cli test-results --failures          # inspect failed/errored tests + parsed
 eqm-cli run-tests myproject com.example.OrderServiceTest --mode debug --no-wait
 ```
 
+**6. Moldable Inspector & Native Toolkit Views (`inspect-*`, `call-explorer`, `trace-view`, `junit-view`, `view-open`)**
+
+Open contextual multi-tab inspectors on suspended debug frames, expressions/JSON strings, or JDT symbols, and explore call graphs, execution traces, and test failures in native SWT views:
+
+```powershell
+eqm-cli inspect-frame <frameId>
+eqm-cli inspect-value <frameId> "order" --depth 3
+eqm-cli inspect-symbol /myproject/src/OrderService.java:412
+eqm-cli call-explorer /myproject/src/OrderService.java:412 --direction both --depth 3 --mode hybrid
+eqm-cli trace-view --limit 200
+eqm-cli junit-view --failures
+```
+
+- External OSGi bundles can register `IMoldableViewProvider` services to contribute custom inspector tabs without SWT dependencies.
+- `view-open` / `view-update` support native Java/SWT kinds (`table`, `tree`, `markdown`, `key-value`, `tabs`, `graph`, `split`, `form`), optional `live` bridge-event bindings, and an optional `html` WebView2 view host.
+- See [docs/moldable-toolkit.md](docs/moldable-toolkit.md) for full `ViewSpec` JSON schemas, `ViewAction` types, `live` bindings, `window.equimacs` JS bridge docs, and `IMoldableViewProvider` SPI examples.
+
+**7. Live UI Inspection, Widget Driving & Diff-Filtered Reviews (`ui-*`, `review-list`)**
+
+Inspect live SWT workbench controls or modal dialogs, drive clicks/text input, filter review threads to current git diffs, or open custom native views:
+
+```powershell
+eqm-cli ui-tree --root active --depth 6
+eqm-cli ui-type w_12 "calculate" --submit
+eqm-cli ui-click --type Button --text "OK"
+eqm-cli review-list --changed-hunks
+eqm-cli view-open my-notes '{"kind":"markdown","title":"Notes","content":"# Hello"}'
+```
+
 ## `eqm-mgr`
 
 `eqm-mgr` is the local manager CLI for this repository.
@@ -251,7 +294,7 @@ Typical local build:
 java Build.java
 ```
 
-This compiles the protocol, bridge/debug/app bundles, CLI tools, packages
+This compiles the protocol, bridge/debug/ui/app bundles, CLI tools, packages
 `eqm-cli` and `eqm-mgr`, and deploys the bundles into the configured Eclipse
 installation.
 
@@ -270,8 +313,9 @@ Parser/unit tests:
 java Build.java --test
 ```
 
-This builds only the CLI library, protocol, CLI, and parser tests. It does not
-start Eclipse and should stay fast.
+This runs fast pure-Java unit tests without starting Eclipse: CLI parser tests
+(`tools/cli/src/test/java/`), debug core tests (`plugins/org.equimacs.debug/src/test/java/`),
+and UI/view-host/toolkit/review core tests (`plugins/org.equimacs.eclipse.ui/src/test/java/`).
 
 Headless end-to-end tests:
 
@@ -302,16 +346,27 @@ After building and deploying the plugin into `dropins/`, the bridge starts autom
 
 Use `Equimacs Bridge > Start Listening` only if you have stopped it and want to bring the socket back manually.
 
-The IDE build also includes `org.equimacs.eclipse.ui`, which contributes the
-Equimacs Review view, right-click/keybinding support for adding review
-comments, and editor annotations for unresolved review threads. Review comments
-are persisted in the workspace under `.equimacs-review/` and render as Eclipse
-markers with hover text, a ruler icon, and a line highlight.
+The IDE build also includes `org.equimacs.eclipse.ui`, which contributes:
+
+- **Equimacs Review view** (`org.equimacs.eclipse.ui.reviewView`), right-click/keybinding
+  support (`M1+M3+C`) for adding review comments, automatic line re-anchoring on save,
+  git-diff filtering (`--changed-files` / `--changed-hunks`), and persistent workspace markers
+  under `.equimacs-review/`
+- **Native-first `ModdableView` host** (`org.equimacs.eclipse.ui.moddableView`), built-in
+  Moldable Toolkit views (`call-explorer`, `trace-view`, `junit-view`), and auto-expiring
+  `open-file` range highlights (`org.equimacs.eclipse.ui.tempHighlight`)
+- **Live SWT UI inspection & driving** (`ui-tree`, `ui-click`, `ui-type`)
+
+Note that `eqm-cli reload` hot-reloads `org.equimacs.eclipse.bridge` and `org.equimacs.debug`,
+whereas changes to `org.equimacs.eclipse.ui` require restarting Eclipse so the workbench
+extension registry refreshes cleanly.
 
 Useful diagnostics:
 
 ```powershell
 eqm-cli handlers
+eqm-cli view-list
+eqm-cli inspect-providers
 eqm-cli review-diagnostics /myproject/src/myproject/Main.java
 eqm-cli eclipse-editor-diagnostics
 eqm-cli review-editor-diagnostics /myproject/src/myproject/Main.java:42

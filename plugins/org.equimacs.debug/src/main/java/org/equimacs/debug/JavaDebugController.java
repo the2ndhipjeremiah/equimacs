@@ -354,9 +354,48 @@ public class JavaDebugController {
         return result;
     }
 
-    public List<Map<String, Object>> getVariables(long frameId) throws CoreException {
+    IStackFrame getStackFrame(long frameId) throws CoreException {
         IStackFrame frame = frameRegistry.get(frameId);
-        if (frame == null) throw error("Frame not found: " + frameId + " — call 'stack' first");
+        if (frame == null) {
+            throw error("Frame not found: " + frameId + " — call 'stack' first");
+        }
+        return frame;
+    }
+
+    IJavaValue evaluateRawValue(long frameId, String expression) throws CoreException {
+        if (expression == null || expression.isBlank()) {
+            throw error("Evaluate requires a non-blank expression");
+        }
+        IJavaStackFrame javaFrame = requireSuspendedJavaFrame(frameId);
+        String trimmed = expression.trim();
+        if (LogpointTemplate.isSimpleIdentifier(trimmed)) {
+            for (IVariable variable : javaFrame.getVariables()) {
+                if (trimmed.equals(variable.getName()) && variable.getValue() instanceof IJavaValue jv) {
+                    return jv;
+                }
+            }
+        }
+
+        IJavaDebugTarget javaTarget = (IJavaDebugTarget) javaFrame.getDebugTarget();
+        IJavaProject javaProject = resolveJavaProjectForFrame(javaFrame);
+        if (javaProject == null) {
+            throw error("Could not resolve Java project for stack frame: " + javaFrame.getDeclaringTypeName());
+        }
+
+        IAstEvaluationEngine engine = EvaluationManager.newAstEvaluationEngine(javaProject, javaTarget);
+        try {
+            RawEvalResult raw = evaluateRawExpressionOnEngine(engine, javaFrame, expression, 15);
+            if (raw.errorMessage() != null) {
+                throw error(raw.errorMessage());
+            }
+            return raw.value();
+        } finally {
+            engine.dispose();
+        }
+    }
+
+    public List<Map<String, Object>> getVariables(long frameId) throws CoreException {
+        IStackFrame frame = getStackFrame(frameId);
         List<Map<String, Object>> result = new ArrayList<>();
         for (IVariable var : frame.getVariables()) {
             Map<String, Object> info = new HashMap<>();
@@ -377,19 +416,8 @@ public class JavaDebugController {
         if (expression == null || expression.isBlank()) {
             throw error("Evaluate requires a non-blank expression");
         }
-        IStackFrame frame = frameRegistry.get(frameId);
-        if (frame == null) {
-            throw error("Frame not found: " + frameId + " — call 'stack' first");
-        }
-        if (!(frame instanceof IJavaStackFrame javaFrame)) {
-            throw error("Frame is not a Java stack frame: " + frameId);
-        }
-        if (!javaFrame.isSuspended()) {
-            throw error("Frame is not suspended: " + frameId);
-        }
-        if (!(javaFrame.getDebugTarget() instanceof IJavaDebugTarget javaTarget)) {
-            throw error("Debug target is not a Java debug target");
-        }
+        IJavaStackFrame javaFrame = requireSuspendedJavaFrame(frameId);
+        IJavaDebugTarget javaTarget = (IJavaDebugTarget) javaFrame.getDebugTarget();
 
         IJavaProject javaProject = resolveJavaProjectForFrame(javaFrame);
         if (javaProject == null) {
@@ -415,7 +443,40 @@ public class JavaDebugController {
         }
     }
 
+    private IJavaStackFrame requireSuspendedJavaFrame(long frameId) throws CoreException {
+        IStackFrame frame = getStackFrame(frameId);
+        if (!(frame instanceof IJavaStackFrame javaFrame)) {
+            throw error("Frame is not a Java stack frame: " + frameId);
+        }
+        if (!javaFrame.isSuspended()) {
+            throw error("Frame is not suspended: " + frameId);
+        }
+        if (!(javaFrame.getDebugTarget() instanceof IJavaDebugTarget)) {
+            throw error("Debug target is not a Java debug target");
+        }
+        return javaFrame;
+    }
+
+    private record RawEvalResult(IJavaValue value, String errorMessage) {}
+
     private LogpointTemplate.EvalOutcome evaluateExpressionOnEngine(
+        IAstEvaluationEngine engine,
+        IJavaStackFrame javaFrame,
+        String expression,
+        long timeoutSeconds
+    ) throws CoreException {
+        RawEvalResult raw = evaluateRawExpressionOnEngine(engine, javaFrame, expression, timeoutSeconds);
+        if (raw.errorMessage() != null) {
+            return new LogpointTemplate.EvalError(raw.errorMessage());
+        }
+        IJavaValue value = raw.value();
+        if (value == null) {
+            return new LogpointTemplate.Value(null, "void", true);
+        }
+        return new LogpointTemplate.Value(value.getValueString(), value.getReferenceTypeName(), value.isNull());
+    }
+
+    private RawEvalResult evaluateRawExpressionOnEngine(
         IAstEvaluationEngine engine,
         IJavaStackFrame javaFrame,
         String expression,
@@ -423,7 +484,8 @@ public class JavaDebugController {
     ) throws CoreException {
         ICompiledExpression compiled = engine.getCompiledExpression(expression, javaFrame);
         if (compiled.hasErrors()) {
-            return new LogpointTemplate.EvalError(
+            return new RawEvalResult(
+                null,
                 "Expression compilation failed: " + String.join("; ", compiled.getErrorMessages()));
         }
 
@@ -439,29 +501,27 @@ public class JavaDebugController {
                     javaThread.terminateEvaluation();
                 } catch (DebugException ignored) {}
             }
-            return new LogpointTemplate.EvalError(
+            return new RawEvalResult(
+                null,
                 "Evaluation timed out after " + timeoutSeconds + "s: " + expression);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return new LogpointTemplate.EvalError("Evaluation interrupted: " + expression);
+            return new RawEvalResult(null, "Evaluation interrupted: " + expression);
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
-            return new LogpointTemplate.EvalError(
+            return new RawEvalResult(
+                null,
                 "Evaluation failed: " + (cause != null ? cause.getMessage() : e.getMessage()));
         }
 
         if (evalResult.isTerminated()) {
-            return new LogpointTemplate.EvalError("Evaluation terminated before completing: " + expression);
+            return new RawEvalResult(null, "Evaluation terminated before completing: " + expression);
         }
         if (evalResult.hasErrors()) {
-            return new LogpointTemplate.EvalError("Evaluation failed: " + formatEvaluationErrors(evalResult));
+            return new RawEvalResult(null, "Evaluation failed: " + formatEvaluationErrors(evalResult));
         }
 
-        IJavaValue value = evalResult.getValue();
-        if (value == null) {
-            return new LogpointTemplate.Value(null, "void", true);
-        }
-        return new LogpointTemplate.Value(value.getValueString(), value.getReferenceTypeName(), value.isNull());
+        return new RawEvalResult(evalResult.getValue(), null);
     }
 
     private static String formatEvaluationErrors(IEvaluationResult evalResult) {

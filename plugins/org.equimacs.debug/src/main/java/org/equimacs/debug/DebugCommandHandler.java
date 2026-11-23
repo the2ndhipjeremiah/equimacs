@@ -1,15 +1,19 @@
 package org.equimacs.debug;
 
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.equimacs.eclipse.bridge.api.IBridgeCommandHandler;
 import org.equimacs.eclipse.bridge.api.IBridgeService;
+import org.equimacs.eclipse.bridge.api.IMoldableViewProvider;
 import org.equimacs.protocol.Request;
 
 public final class DebugCommandHandler implements IBridgeCommandHandler {
 
+    private final CopyOnWriteArrayList<IMoldableViewProvider> viewProviders = new CopyOnWriteArrayList<>();
     private volatile JavaDebugController controller;
     private volatile JUnitTestRunnerService testRunner;
     private volatile JavaNavigationService navigation;
     private volatile ConsoleCaptureService console;
+    private volatile MoldableInspectorService inspector;
     private volatile IBridgeService bridge;
 
     void setBridge(IBridgeService bridge) {
@@ -18,6 +22,32 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
 
     void unsetBridge(IBridgeService bridge) {
         this.bridge = null;
+    }
+
+    void addViewProvider(IMoldableViewProvider provider) {
+        if (provider == null) {
+            return;
+        }
+        synchronized (this) {
+            viewProviders.addIfAbsent(provider);
+            MoldableInspectorService ins = inspector;
+            if (ins != null) {
+                ins.addProvider(provider);
+            }
+        }
+    }
+
+    void removeViewProvider(IMoldableViewProvider provider) {
+        if (provider == null) {
+            return;
+        }
+        synchronized (this) {
+            viewProviders.remove(provider);
+            MoldableInspectorService ins = inspector;
+            if (ins != null) {
+                ins.removeProvider(provider);
+            }
+        }
     }
 
     void activate() {
@@ -42,6 +72,7 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
             cs.dispose();
         }
         navigation = null;
+        inspector = null;
     }
 
     @Override
@@ -107,6 +138,13 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
             case Request.GetTestResults tr -> testRunner().getTestResults(tr.runId(), tr.failuresOnly());
             case Request.GetConsoleOutput co -> console().getConsoleOutput(co.launchName(), co.stream(), co.limit());
             case Request.ClearConsoleOutput _ -> console().clearConsoleOutput();
+            case Request.InspectFrame inf -> inspector().inspectFrame(
+                inf.frameId(), inf.openView(), inf.viewId(), bridge);
+            case Request.InspectValue inv -> inspector().inspectValue(
+                inv.frameId(), inv.expression(), inv.depth(), inv.openView(), inv.viewId(), bridge);
+            case Request.InspectSymbol ins -> inspector().inspectSymbol(
+                ins.file(), ins.offset(), ins.openView(), ins.viewId(), bridge);
+            case Request.ListInspectProviders _ -> inspector().listProviders();
             default -> throw new IllegalArgumentException(
                 "DebugCommandHandler: no handler for " + req.getClass().getSimpleName());
         };
@@ -179,6 +217,21 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
                 console = cs;
             }
             return cs;
+        }
+    }
+
+    private MoldableInspectorService inspector() {
+        MoldableInspectorService ins = inspector;
+        if (ins != null) {
+            return ins;
+        }
+        synchronized (this) {
+            ins = inspector;
+            if (ins == null) {
+                ins = new MoldableInspectorService(controller(), navigation(), viewProviders);
+                inspector = ins;
+            }
+            return ins;
         }
     }
 }

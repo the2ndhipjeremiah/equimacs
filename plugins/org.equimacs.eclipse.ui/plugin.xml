@@ -7,6 +7,11 @@
             class="org.equimacs.eclipse.ui.review.ReviewView"
             allowMultiple="false"
             restorable="true"/>
+      <view id="org.equimacs.eclipse.ui.moddableView"
+            name="Equimacs View"
+            class="org.equimacs.eclipse.ui.viewhost.ModdableView"
+            allowMultiple="true"
+            restorable="false"/>
    </extension>
 
    <extension point="org.eclipse.core.resources.markers"
@@ -20,6 +25,7 @@
       <type name="org.equimacs.eclipse.ui.reviewComment"
             markerType="org.equimacs.eclipse.ui.reviewComment"
             markerSeverity="0"/>
+      <type name="org.equimacs.eclipse.ui.tempHighlight"/>
    </extension>
 
    <extension point="org.eclipse.ui.editors.markerAnnotationSpecification">
@@ -38,6 +44,24 @@
             verticalRulerPreferenceKey="org.equimacs.eclipse.ui.reviewComment.verticalRuler"
             verticalRulerPreferenceValue="true"
             overviewRulerPreferenceKey="org.equimacs.eclipse.ui.reviewComment.overviewRuler"
+            overviewRulerPreferenceValue="true"
+            isGoToNextNavigationTarget="false"
+            isGoToPreviousNavigationTarget="false"
+            showInNextPrevDropdownToolbarAction="false"/>
+      <specification
+            annotationType="org.equimacs.eclipse.ui.tempHighlight"
+            label="Equimacs Navigation Highlight"
+            colorPreferenceKey="org.equimacs.eclipse.ui.tempHighlight.color"
+            colorPreferenceValue="255,230,128"
+            textPreferenceKey="org.equimacs.eclipse.ui.tempHighlight.text"
+            textPreferenceValue="true"
+            textStylePreferenceKey="org.equimacs.eclipse.ui.tempHighlight.textStyle"
+            textStylePreferenceValue="HIGHLIGHT"
+            highlightPreferenceKey="org.equimacs.eclipse.ui.tempHighlight.highlight"
+            highlightPreferenceValue="true"
+            verticalRulerPreferenceKey="org.equimacs.eclipse.ui.tempHighlight.verticalRuler"
+            verticalRulerPreferenceValue="false"
+            overviewRulerPreferenceKey="org.equimacs.eclipse.ui.tempHighlight.overviewRuler"
             overviewRulerPreferenceValue="true"
             isGoToNextNavigationTarget="false"
             isGoToPreviousNavigationTarget="false"

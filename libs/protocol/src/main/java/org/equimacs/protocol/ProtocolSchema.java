@@ -157,10 +157,11 @@ public class ProtocolSchema {
           }
         },
         "review-list": {
-          "description": "List review comment threads, optionally filtered to a file",
+          "description": "List review comment threads, optionally filtered to a file and/or git diff status",
           "record": "ListReviewComments",
           "params": {
-            "file": { "type": "string", "optional": true, "description": "Workspace-relative file path; omit for all" }
+            "file": { "type": "string", "optional": true, "description": "Workspace-relative file path; omit for all" },
+            "filter": { "type": "string", "optional": true, "enum": ["all", "changed-files", "changed-hunks"], "default": "all", "description": "Filter threads against current git working tree diff" }
           }
         },
         "review-reply": {
@@ -300,6 +301,141 @@ public class ProtocolSchema {
             "viewId": { "type": "string", "description": "Eclipse view ID (e.g. org.equimacs.eclipse.ui.reviewView)" },
             "secondaryId": { "type": "string", "optional": true, "description": "Optional secondary view ID for multi-instance views" }
           }
+        },
+        "ui-tree": {
+          "description": "Inspect the live SWT widget hierarchy and Eclipse workbench/E4 parts",
+          "record": "UiTree",
+          "params": {
+            "root": { "type": "string", "optional": true, "default": "active", "description": "Root scope: active, all, dialog, editor, or view:<viewId>" },
+            "maxDepth": { "type": "integer", "optional": true, "default": 8, "description": "Maximum widget tree depth (1..32)" },
+            "visibleOnly": { "type": "boolean", "optional": true, "default": true, "description": "When true, omit hidden SWT controls" },
+            "textFilter": { "type": "string", "optional": true, "description": "Case-insensitive substring filter matched against widget text/tooltip/message/elementId/items" },
+            "widgetType": { "type": "string", "optional": true, "description": "Case-insensitive SWT widget class simple-name filter (e.g. Button, Text, Tree)" }
+          }
+        },
+        "ui-click": {
+          "description": "Drive a click/selection event on an SWT widget or item",
+          "record": "UiClick",
+          "params": {
+            "widgetId": { "type": "string", "optional": true, "description": "Runtime widget ID from ui-tree (e.g. w_14)" },
+            "root": { "type": "string", "optional": true, "default": "active", "description": "Root scope for selector matching when widgetId is omitted" },
+            "widgetType": { "type": "string", "optional": true, "description": "Widget simple class name selector" },
+            "text": { "type": "string", "optional": true, "description": "Widget text/tooltip/message selector" },
+            "index": { "type": "integer", "optional": true, "default": 0, "description": "0-based match index when selector matches multiple widgets" },
+            "itemText": { "type": "string", "optional": true, "description": "Item text for Tree, Table, List, Combo, TabFolder, or CTabFolder" },
+            "doubleClick": { "type": "boolean", "optional": true, "default": false, "description": "Also dispatch SWT.DefaultSelection" }
+          }
+        },
+        "ui-type": {
+          "description": "Focus and enter text into an SWT Text, StyledText, or Combo widget",
+          "record": "UiType",
+          "params": {
+            "widgetId": { "type": "string", "optional": true, "description": "Runtime widget ID from ui-tree" },
+            "root": { "type": "string", "optional": true, "default": "active", "description": "Root scope for selector matching when widgetId is omitted" },
+            "widgetType": { "type": "string", "optional": true, "description": "Widget simple class name selector" },
+            "text": { "type": "string", "optional": true, "description": "Widget text/message/tooltip selector" },
+            "index": { "type": "integer", "optional": true, "default": 0, "description": "0-based match index" },
+            "value": { "type": "string", "description": "Text to set or append" },
+            "append": { "type": "boolean", "optional": true, "default": false, "description": "Append to existing text instead of replacing" },
+            "submit": { "type": "boolean", "optional": true, "default": false, "description": "Dispatch Return traversal / default selection after entering text" }
+          }
+        },
+        "view-open": {
+          "description": "Open or replace a multi-instance native SWT moddable view from a JSON ViewSpec (with optional top-level live event binding)",
+          "record": "ViewOpen",
+          "params": {
+            "viewId": { "type": "string", "description": "Logical view instance ID (alphanumeric, dot, underscore, hyphen)" },
+            "title": { "type": "string", "optional": true, "description": "Optional tab title override" },
+            "specJson": { "type": "string", "description": "JSON ViewSpec (kinds: table, tree, markdown, key-value, tabs, graph, split, form, html — native Java/SWT kinds including graph preferred; html is optional WebView2) plus optional top-level live binding ({ events, onEvent, pushToHtml, debounceMs })" }
+          }
+        },
+        "view-update": {
+          "description": "Update an existing moddable view with a new JSON ViewSpec (with optional top-level live event binding)",
+          "record": "ViewUpdate",
+          "params": {
+            "viewId": { "type": "string", "description": "Existing logical view instance ID" },
+            "title": { "type": "string", "optional": true, "description": "Optional tab title override" },
+            "specJson": { "type": "string", "description": "JSON ViewSpec (kinds: table, tree, markdown, key-value, tabs, graph, split, form, html — native Java/SWT kinds including graph preferred; html is optional WebView2) plus optional top-level live binding ({ events, onEvent, pushToHtml, debounceMs })" }
+          }
+        },
+        "view-close": {
+          "description": "Close and remove a moddable view by logical viewId",
+          "record": "ViewClose",
+          "params": {
+            "viewId": { "type": "string", "description": "Logical view instance ID" }
+          }
+        },
+        "view-list": {
+          "description": "List registered moddable views and whether their Eclipse ViewPart is open",
+          "record": "ViewList",
+          "params": {}
+        },
+        "inspect-frame": {
+          "description": "Inspect a suspended debug stack frame with registered moldable inspector tabs",
+          "record": "InspectFrame",
+          "params": {
+            "frameId": { "type": "long", "description": "Unique ID of the suspended stack frame" },
+            "openView": { "type": "boolean", "optional": true, "default": true, "description": "Open or update the moldable inspector view in the workbench" },
+            "viewId": { "type": "string", "optional": true, "description": "Optional moddable view ID override" }
+          }
+        },
+        "inspect-value": {
+          "description": "Evaluate and inspect a Java expression in a suspended stack frame with moldable inspector tabs",
+          "record": "InspectValue",
+          "params": {
+            "frameId": { "type": "long", "description": "Unique ID of the suspended stack frame" },
+            "expression": { "type": "string", "description": "Java expression to evaluate and inspect" },
+            "depth": { "type": "integer", "optional": true, "default": 2, "description": "Object graph expansion depth (>= 1)" },
+            "openView": { "type": "boolean", "optional": true, "default": true, "description": "Open or update the moldable inspector view in the workbench" },
+            "viewId": { "type": "string", "optional": true, "description": "Optional moddable view ID override" }
+          }
+        },
+        "inspect-symbol": {
+          "description": "Inspect the Java symbol at <file>:<offset> with moldable JDT inspector tabs",
+          "record": "InspectSymbol",
+          "params": {
+            "file": { "type": "string", "description": "Workspace-relative or absolute Java file path" },
+            "offset": { "type": "integer", "description": "0-based character offset inside the file" },
+            "openView": { "type": "boolean", "optional": true, "default": true, "description": "Open or update the moldable inspector view in the workbench" },
+            "viewId": { "type": "string", "optional": true, "description": "Optional moddable view ID override" }
+          }
+        },
+        "inspect-providers": {
+          "description": "List registered moldable object inspector providers and their capabilities",
+          "record": "ListInspectProviders",
+          "params": {}
+        },
+        "call-explorer": {
+          "description": "Open a moldable call-graph explorer view for the Java method at <file>:<offset>",
+          "record": "OpenCallExplorer",
+          "params": {
+            "file": { "type": "string", "description": "Workspace-relative or absolute Java file path" },
+            "offset": { "type": "integer", "description": "0-based character offset inside the file" },
+            "direction": { "type": "string", "optional": true, "enum": ["callers", "callees", "both"], "default": "callers", "description": "Traversal direction" },
+            "depth": { "type": "integer", "optional": true, "default": 3, "description": "Traversal depth (>= 1)" },
+            "hideJdk": { "type": "boolean", "optional": true, "default": true, "description": "Hide JDK/standard library methods" },
+            "viewMode": { "type": "string", "optional": true, "enum": ["tree", "hybrid"], "default": "hybrid", "description": "Explorer presentation mode" },
+            "viewId": { "type": "string", "optional": true, "description": "Optional moddable view ID override" }
+          }
+        },
+        "trace-view": {
+          "description": "Open a moldable live execution trace view over recorded logpoint events",
+          "record": "OpenTraceView",
+          "params": {
+            "limit": { "type": "integer", "optional": true, "default": 200, "description": "Maximum number of recent trace entries (>= 1)" },
+            "live": { "type": "boolean", "optional": true, "default": true, "description": "Automatically refresh on LogpointHit events" },
+            "viewId": { "type": "string", "optional": true, "description": "Optional moddable view ID override" }
+          }
+        },
+        "junit-view": {
+          "description": "Open a moldable live JUnit test runner view for a test run",
+          "record": "OpenJUnitView",
+          "params": {
+            "runId": { "type": "string", "optional": true, "description": "Test run ID (defaults to most recent run)" },
+            "failuresOnly": { "type": "boolean", "optional": true, "default": false, "description": "Show only failed or errored tests" },
+            "live": { "type": "boolean", "optional": true, "default": true, "description": "Automatically refresh on TestRunFinished events" },
+            "viewId": { "type": "string", "optional": true, "description": "Optional moddable view ID override" }
+          }
         }
       },
       "responses": {
@@ -312,7 +448,8 @@ public class ProtocolSchema {
           "ThreadSuspended": { "fields": ["threadId", "reason"] },
           "ThreadResumed": { "fields": ["threadId"] },
           "ThreadTerminated": { "fields": ["threadId"] },
-          "TestRunFinished": { "fields": ["runId", "name", "project", "status", "total", "passed", "failed", "errors", "ignored", "elapsedSeconds"] }
+          "TestRunFinished": { "fields": ["runId", "name", "project", "status", "total", "passed", "failed", "errors", "ignored", "elapsedSeconds"] },
+          "ViewAction": { "fields": ["viewId", "action", "itemId", "payload", "timestampMs"] }
         }
       }
     }

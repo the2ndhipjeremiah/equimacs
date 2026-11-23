@@ -15,10 +15,14 @@ Require-Bundle: org.eclipse.ui,
  org.eclipse.core.resources,
  org.eclipse.core.filebuffers,
  org.eclipse.core.commands,
+ org.eclipse.e4.ui.model.workbench,
  com.google.gson
 Import-Package: org.equimacs.eclipse.bridge.api,
  org.equimacs.protocol
-Service-Component: OSGI-INF/ReviewCommandHandler.xml
+Service-Component: OSGI-INF/ReviewCommandHandler.xml,
+ OSGI-INF/UiInspectCommandHandler.xml,
+ OSGI-INF/ModdableViewCommandHandler.xml,
+ OSGI-INF/ToolkitViewCommandHandler.xml
 Bundle-RequiredExecutionEnvironment: JavaSE-26
 Eclipse-BundleShape: dir
 Automatic-Module-Name: org.equimacs.eclipse.ui

@@ -5,12 +5,15 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSerializer;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.Channels;
 import java.nio.channels.SocketChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
@@ -342,19 +345,7 @@ public class EquimacsCLI {
                 }
                 case "test-results" -> {
                     String runId = args.size() > 1 ? args.get(1) : null;
-                    boolean failuresOnly = cli.hasFlag("failures", "failures-only");
-                    String failuresOpt = cli.getOption("failures-only");
-                    if (failuresOpt != null) {
-                        if ("true".equalsIgnoreCase(failuresOpt)) {
-                            failuresOnly = true;
-                        } else if ("false".equalsIgnoreCase(failuresOpt)) {
-                            failuresOnly = false;
-                        } else {
-                            throw new CliParseException(
-                                "Invalid --failures-only value (expected true or false): " + failuresOpt);
-                        }
-                    }
-                    yield new Request.GetTestResults(runId, failuresOnly);
+                    yield new Request.GetTestResults(runId, parseFailuresOnly(cli));
                 }
                 case "console" -> {
                     String launchName = cli.getOption("launch", "l");
@@ -394,7 +385,11 @@ public class EquimacsCLI {
                         Integer.parseInt(spec.substring(lastColon + 1)),
                         author, text);
                 }
-                case "review-list" -> new Request.ListReviewComments(args.size() > 1 ? args.get(1) : null);
+                case "review-list" -> {
+                    String file = args.size() > 1 ? args.get(1) : null;
+                    String filter = resolveReviewFilter(cli);
+                    yield new Request.ListReviewComments(file, filter);
+                }
                 case "review-reply" -> {
                     if (args.size() < 3) throw new CliParseException("Usage: review-reply <commentId> <text...> [--author <name>]");
                     String author = cli.getOption("author", "a");
@@ -441,6 +436,25 @@ public class EquimacsCLI {
                     }
                     yield new Request.ShowView(args.get(1), args.size() > 2 ? args.get(2) : null);
                 }
+                case "ui-tree" -> parseUiTree(cli);
+                case "ui-click" -> parseUiClick(cli, args);
+                case "ui-type" -> parseUiType(cli, args);
+                case "view-open" -> parseViewOpen(cli, args);
+                case "view-update" -> parseViewUpdate(cli, args);
+                case "view-close" -> {
+                    if (args.size() < 2) {
+                        throw new CliParseException("Usage: view-close <viewId>");
+                    }
+                    yield new Request.ViewClose(args.get(1));
+                }
+                case "view-list" -> new Request.ViewList();
+                case "inspect-frame" -> parseInspectFrame(cli, args);
+                case "inspect-value" -> parseInspectValue(cli, args);
+                case "inspect-symbol" -> parseInspectSymbol(cli, args);
+                case "inspect-providers" -> new Request.ListInspectProviders();
+                case "call-explorer" -> parseCallExplorer(cli, args);
+                case "trace-view" -> parseTraceView(cli);
+                case "junit-view" -> parseJUnitView(cli, args);
                 case "review-editor-diagnostics" -> {
                     if (args.size() < 2) {
                         yield new Request.ReviewEditorDiagnostics(null, -1);
@@ -463,6 +477,302 @@ public class EquimacsCLI {
         } catch (RuntimeException e) {
             throw new CliParseException("Parsing error: " + e.getMessage(), e);
         }
+    }
+
+    private static String resolveReviewFilter(CliArgs cli) {
+        boolean changedFiles = cli.hasFlag("changed-files");
+        boolean changedHunks = cli.hasFlag("changed-hunks");
+        String opt = cli.getOption("filter", "f");
+        if (changedFiles && changedHunks) {
+            throw new CliParseException("Specify only one of --changed-files or --changed-hunks");
+        }
+        String raw = changedFiles ? "changed-files" : (changedHunks ? "changed-hunks" : opt);
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "all", "changed-files", "changed-hunks" -> normalized;
+            default -> throw new CliParseException(
+                "Invalid --filter value (expected all, changed-files, or changed-hunks): " + raw);
+        };
+    }
+
+    private static Request.UiTree parseUiTree(CliArgs cli) {
+        String root = cli.getOption("root", "r");
+        if (root == null || root.isBlank()) {
+            root = "active";
+        }
+        String depthStr = cli.getOption("depth", "d");
+        int maxDepth = depthStr != null ? Integer.parseInt(depthStr) : 8;
+        if (maxDepth <= 0) {
+            throw new CliParseException("Invalid --depth value (must be > 0): " + depthStr);
+        }
+        boolean visibleOnly = true;
+        if (cli.hasFlag("all")) {
+            visibleOnly = false;
+        } else {
+            String visOpt = cli.getOption("visible-only");
+            if (visOpt != null) {
+                visibleOnly = parseStrictBoolean("--visible-only", visOpt);
+            }
+        }
+        String textFilter = cli.getOption("filter", "f");
+        String widgetType = cli.getOption("type", "t");
+        return new Request.UiTree(root, maxDepth, visibleOnly, textFilter, widgetType);
+    }
+
+    private static Request.UiClick parseUiClick(CliArgs cli, List<String> args) {
+        String widgetId = cli.getOption("id");
+        if (widgetId == null && args.size() > 1) {
+            widgetId = args.get(1);
+        }
+        String root = cli.getOption("root", "r");
+        String widgetType = cli.getOption("type", "t");
+        String text = cli.getOption("text");
+        String itemText = cli.getOption("item");
+        String indexStr = cli.getOption("index", "i");
+        int index = indexStr != null ? Integer.parseInt(indexStr) : 0;
+        if (index < 0) {
+            throw new CliParseException("Invalid --index value (must be >= 0): " + indexStr);
+        }
+        boolean doubleClick = parseFlagOrBooleanOption(cli, "double-click");
+        if (isBlank(widgetId) && isBlank(text) && isBlank(widgetType) && isBlank(itemText)) {
+            throw new CliParseException(
+                "Usage: ui-click [widgetId] [--id <widgetId>] [--root <scope>] [--type <widgetType>] [--text <label>] [--index <n>] [--item <itemText>] [--double-click]");
+        }
+        return new Request.UiClick(widgetId, root, widgetType, text, index, itemText, doubleClick);
+    }
+
+    private static Request.UiType parseUiType(CliArgs cli, List<String> args) {
+        String usage = "Usage: ui-type <widgetId> <value...> [--append] [--submit] OR ui-type [--id <widgetId>] [--root <scope>] [--type <widgetType>] [--text <label>] [--index <n>] [--value <text>] [value...] [--append] [--submit]";
+        String widgetId = cli.getOption("id");
+        String root = cli.getOption("root", "r");
+        String widgetType = cli.getOption("type", "t");
+        String text = cli.getOption("text");
+        String indexStr = cli.getOption("index", "i");
+        int index = indexStr != null ? Integer.parseInt(indexStr) : 0;
+        if (index < 0) {
+            throw new CliParseException("Invalid --index value (must be >= 0): " + indexStr);
+        }
+        String value = cli.getOption("value", "v");
+        boolean append = parseFlagOrBooleanOption(cli, "append");
+        boolean submit = parseFlagOrBooleanOption(cli, "submit");
+
+        if (isBlank(widgetId) && isBlank(widgetType) && isBlank(text)) {
+            if (args.size() < 2) {
+                throw new CliParseException(usage);
+            }
+            widgetId = args.get(1);
+            if (value == null) {
+                if (args.size() < 3) {
+                    throw new CliParseException(usage);
+                }
+                value = String.join(" ", args.subList(2, args.size()));
+            }
+        } else if (value == null) {
+            if (args.size() < 2) {
+                throw new CliParseException(usage);
+            }
+            value = String.join(" ", args.subList(1, args.size()));
+        }
+        return new Request.UiType(widgetId, root, widgetType, text, index, value, append, submit);
+    }
+
+    private static Request.ViewOpen parseViewOpen(CliArgs cli, List<String> args) {
+        ViewSpecInput input = parseViewSpecInput(
+            cli, args, "Usage: view-open <viewId> [specJson] [--title <title>] [--spec <json>] [--spec-file <path>]");
+        return new Request.ViewOpen(input.viewId(), input.title(), input.specJson());
+    }
+
+    private static Request.ViewUpdate parseViewUpdate(CliArgs cli, List<String> args) {
+        ViewSpecInput input = parseViewSpecInput(
+            cli, args, "Usage: view-update <viewId> [specJson] [--title <title>] [--spec <json>] [--spec-file <path>]");
+        return new Request.ViewUpdate(input.viewId(), input.title(), input.specJson());
+    }
+
+    private record ViewSpecInput(String viewId, String title, String specJson) {}
+
+    private static ViewSpecInput parseViewSpecInput(CliArgs cli, List<String> args, String usage) {
+        if (args.size() < 2) {
+            throw new CliParseException(usage);
+        }
+        String viewId = args.get(1);
+        String title = cli.getOption("title", "t");
+        String specFile = cli.getOption("spec-file");
+        String specJson = cli.getOption("spec");
+        if (specFile != null) {
+            try {
+                specJson = Files.readString(Path.of(specFile), StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                throw new CliParseException("Failed to read --spec-file " + specFile + ": " + e.getMessage(), e);
+            }
+        } else if (specJson == null && args.size() > 2) {
+            specJson = String.join(" ", args.subList(2, args.size()));
+        }
+        if (isBlank(specJson)) {
+            throw new CliParseException(usage);
+        }
+        return new ViewSpecInput(viewId, title, specJson);
+    }
+
+    private static Request.InspectFrame parseInspectFrame(CliArgs cli, List<String> args) {
+        if (args.size() < 2) {
+            throw new CliParseException(
+                "Usage: inspect-frame <frameId> [--open true|false | --no-open] [--view-id <id>]");
+        }
+        long frameId = Long.parseLong(args.get(1));
+        Boolean openView = parseDefaultTrueToggle(cli, "open", "no-open");
+        String viewId = cli.getOption("view-id");
+        return new Request.InspectFrame(frameId, openView, viewId);
+    }
+
+    private static Request.InspectValue parseInspectValue(CliArgs cli, List<String> args) {
+        String usage = "Usage: inspect-value <frameId> <expression...> [--depth <n>] [--open true|false | --no-open] [--view-id <id>]";
+        if (args.size() < 2) {
+            throw new CliParseException(usage);
+        }
+        long frameId = Long.parseLong(args.get(1));
+        String expression = cli.getOption("expr", "e");
+        if (expression == null && args.size() > 2) {
+            expression = String.join(" ", args.subList(2, args.size()));
+        }
+        if (isBlank(expression)) {
+            throw new CliParseException(usage);
+        }
+        int depth = parseIntAtLeast("--depth", cli.getOption("depth", "d"), 2, 1);
+        Boolean openView = parseDefaultTrueToggle(cli, "open", "no-open");
+        String viewId = cli.getOption("view-id");
+        return new Request.InspectValue(frameId, expression, depth, openView, viewId);
+    }
+
+    private static Request.InspectSymbol parseInspectSymbol(CliArgs cli, List<String> args) {
+        String usage = "Usage: inspect-symbol <file>:<offset> [--open true|false | --no-open] [--view-id <id>]";
+        if (args.size() < 2) {
+            throw new CliParseException(usage);
+        }
+        FileOffset target = parseFileOffset(args.get(1), usage);
+        Boolean openView = parseDefaultTrueToggle(cli, "open", "no-open");
+        String viewId = cli.getOption("view-id");
+        return new Request.InspectSymbol(target.file(), target.offset(), openView, viewId);
+    }
+
+    private static Request.OpenCallExplorer parseCallExplorer(CliArgs cli, List<String> args) {
+        String usage = "Usage: call-explorer <file>:<offset> [--direction callers|callees|both] [--depth <n>] [--hide-jdk true|false | --show-jdk] [--mode tree|hybrid] [--view-id <id>]";
+        if (args.size() < 2) {
+            throw new CliParseException(usage);
+        }
+        FileOffset target = parseFileOffset(args.get(1), usage);
+        String direction = parseAllowedOption(
+            "--direction", cli.getOption("direction", "d"), "callers", List.of("callers", "callees", "both"));
+        int depth = parseIntAtLeast("--depth", cli.getOption("depth"), 3, 1);
+        Boolean hideJdk = parseDefaultTrueToggle(cli, "hide-jdk", "show-jdk");
+        String viewMode = parseAllowedOption(
+            "--mode", cli.getOption("mode", "m"), "hybrid", List.of("tree", "hybrid"));
+        String viewId = cli.getOption("view-id");
+        return new Request.OpenCallExplorer(
+            target.file(), target.offset(), direction, depth, hideJdk, viewMode, viewId);
+    }
+
+    private static Request.OpenTraceView parseTraceView(CliArgs cli) {
+        int limit = parseIntAtLeast("--limit", cli.getOption("limit", "n"), 200, 1);
+        Boolean live = parseDefaultTrueToggle(cli, "live", "no-live");
+        String viewId = cli.getOption("view-id");
+        return new Request.OpenTraceView(limit, live, viewId);
+    }
+
+    private static Request.OpenJUnitView parseJUnitView(CliArgs cli, List<String> args) {
+        String runId = cli.getOption("run-id");
+        if (runId == null && args.size() > 1) {
+            runId = args.get(1);
+        }
+        Boolean failuresOnly = parseFailuresOnly(cli);
+        Boolean live = parseDefaultTrueToggle(cli, "live", "no-live");
+        String viewId = cli.getOption("view-id");
+        return new Request.OpenJUnitView(runId, failuresOnly, live, viewId);
+    }
+
+    private record FileOffset(String file, int offset) {}
+
+    private static FileOffset parseFileOffset(String spec, String usage) {
+        int lastColon = spec.lastIndexOf(':');
+        if (lastColon <= 1 || lastColon == spec.length() - 1) {
+            throw new CliParseException(usage);
+        }
+        int offset = Integer.parseInt(spec.substring(lastColon + 1));
+        if (offset < 0) {
+            throw new CliParseException("Invalid offset (must be >= 0): " + offset);
+        }
+        return new FileOffset(spec.substring(0, lastColon), offset);
+    }
+
+    private static Boolean parseDefaultTrueToggle(CliArgs cli, String optionName, String negativeFlag) {
+        if (cli.hasFlag(negativeFlag)) {
+            return Boolean.FALSE;
+        }
+        if (cli.hasFlag(optionName)) {
+            return Boolean.TRUE;
+        }
+        String raw = cli.getOption(optionName);
+        if (raw != null) {
+            return parseStrictBoolean("--" + optionName, raw);
+        }
+        return Boolean.TRUE;
+    }
+
+    private static boolean parseFailuresOnly(CliArgs cli) {
+        boolean failuresOnly = cli.hasFlag("failures", "failures-only");
+        String failuresOpt = cli.getOption("failures-only");
+        if (failuresOpt != null) {
+            failuresOnly = parseStrictBoolean("--failures-only", failuresOpt);
+        }
+        return failuresOnly;
+    }
+
+    private static int parseIntAtLeast(String flagName, String raw, int defaultVal, int minVal) {
+        if (raw == null) {
+            return defaultVal;
+        }
+        int value = Integer.parseInt(raw);
+        if (value < minVal) {
+            throw new CliParseException(
+                "Invalid " + flagName + " value (must be >= " + minVal + "): " + raw);
+        }
+        return value;
+    }
+
+    private static String parseAllowedOption(String flagName, String raw, String defaultVal, List<String> allowed) {
+        if (raw == null) {
+            return defaultVal;
+        }
+        String normalized = raw.trim().toLowerCase(Locale.ROOT);
+        if (allowed.contains(normalized)) {
+            return normalized;
+        }
+        throw new CliParseException(
+            "Invalid " + flagName + " value (expected " + String.join(", ", allowed) + "): " + raw);
+    }
+
+    private static boolean parseFlagOrBooleanOption(CliArgs cli, String name) {
+        if (cli.hasFlag(name)) {
+            return true;
+        }
+        String opt = cli.getOption(name);
+        return opt != null && parseStrictBoolean("--" + name, opt);
+    }
+
+    private static boolean parseStrictBoolean(String flagName, String raw) {
+        if ("true".equalsIgnoreCase(raw)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(raw)) {
+            return false;
+        }
+        throw new CliParseException("Invalid " + flagName + " value (expected true or false): " + raw);
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     public static String sendRequest(Request request) throws Exception {

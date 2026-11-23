@@ -1,19 +1,25 @@
 package org.equimacs.eclipse.ui.review;
 
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicReference;
 import org.eclipse.core.commands.Command;
 import org.eclipse.core.commands.ParameterizedCommand;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IMarker;
 import org.eclipse.core.resources.IResource;
+import org.eclipse.core.resources.IResourceChangeEvent;
+import org.eclipse.core.resources.IResourceChangeListener;
+import org.eclipse.core.resources.IResourceDelta;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.Path;
+import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.text.IDocument;
-import org.eclipse.jface.text.IRegion;
 import org.eclipse.jface.text.ITextSelection;
 import org.eclipse.jface.text.Position;
 import org.eclipse.jface.text.source.Annotation;
@@ -46,7 +52,9 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
 
     private volatile IBridgeService bridge;
     private volatile boolean uiInitialized;
+    private volatile IResourceChangeListener resourceChangeListener;
     private final ReviewStore store = new ReviewStore();
+    private final GitDiffService gitDiffService = new GitDiffService();
 
     void setBridge(IBridgeService bridge) {
         this.bridge = bridge;
@@ -64,8 +72,27 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
         if (uiInitialized) {
             return;
         }
+        Display display = workbenchDisplay();
+        if (display == null) {
+            // Workbench is not running yet; retry on first request once UI is ready.
+            return;
+        }
         try {
-            initAnnotationPreferences();
+            if (Display.getCurrent() == display) {
+                initAnnotationPreferences();
+            } else {
+                AtomicReference<RuntimeException> error = new AtomicReference<>();
+                display.syncExec(() -> {
+                    try {
+                        initAnnotationPreferences();
+                    } catch (RuntimeException e) {
+                        error.set(e);
+                    }
+                });
+                if (error.get() != null) {
+                    throw error.get();
+                }
+            }
         } catch (IllegalStateException e) {
             // Workspace instance location is not initialized yet; retry on first request.
             return;
@@ -75,7 +102,25 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
         } catch (Exception e) {
             // Review comments remain available even if decorative markers fail.
         }
+        if (!registerResourceListener()) {
+            return;
+        }
         uiInitialized = true;
+    }
+
+    private boolean registerResourceListener() {
+        if (resourceChangeListener != null) {
+            return true;
+        }
+        IResourceChangeListener listener = this::onResourceChanged;
+        try {
+            ResourcesPlugin.getWorkspace().addResourceChangeListener(listener, IResourceChangeEvent.POST_CHANGE);
+            resourceChangeListener = listener;
+            return true;
+        } catch (IllegalStateException e) {
+            // Workspace is not initialized yet; retry on first request.
+            return false;
+        }
     }
 
     private static void initAnnotationPreferences() {
@@ -87,10 +132,85 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
         store.setValue(p + ".text", true);
         store.setValue(p + ".textStyle", "HIGHLIGHT");
         store.setValue(p + ".color", "100,180,255");
+        EditorHighlightManager.initAnnotationPreferences();
     }
 
     void deactivate() {
+        IResourceChangeListener listener = resourceChangeListener;
+        resourceChangeListener = null;
+        if (listener != null) {
+            try {
+                ResourcesPlugin.getWorkspace().removeResourceChangeListener(listener);
+            } catch (IllegalStateException e) {
+                // Workspace already shut down.
+            }
+        }
         ReviewMarkerManager.disposeAll();
+        EditorHighlightManager.disposeAll();
+    }
+
+    private void onResourceChanged(IResourceChangeEvent event) {
+        if (event == null || event.getType() != IResourceChangeEvent.POST_CHANGE || event.getDelta() == null) {
+            return;
+        }
+        List<String> changedFiles = new ArrayList<>();
+        try {
+            event.getDelta().accept(delta -> {
+                IResource resource = delta.getResource();
+                if (resource != null && resource.getFullPath() != null) {
+                    String path = resource.getFullPath().toString();
+                    if (isIgnoredReviewPath(path)) {
+                        return false;
+                    }
+                    if (resource instanceof IFile
+                        && (delta.getKind() & IResourceDelta.CHANGED) != 0
+                        && (delta.getFlags() & IResourceDelta.CONTENT) != 0) {
+                        changedFiles.add(path);
+                    }
+                }
+                return true;
+            });
+        } catch (CoreException e) {
+            return;
+        }
+        if (changedFiles.isEmpty()) {
+            return;
+        }
+        Job job = Job.create("Reanchor review comments", monitor -> {
+            if (resourceChangeListener == null) {
+                return Status.OK_STATUS;
+            }
+            boolean modified = false;
+            for (String path : changedFiles) {
+                try {
+                    ReviewStoreCore.ReanchorReport report = store.reanchorFile(path);
+                    if (report.modified()) {
+                        modified = true;
+                    }
+                } catch (Exception e) {
+                    // Best-effort reanchoring on resource change.
+                }
+            }
+            if (modified && resourceChangeListener != null) {
+                try {
+                    ReviewMarkerManager.reconcile(store.list(null));
+                } catch (Exception e) {
+                    // Review comments remain valid even if decorative markers fail.
+                }
+                triggerViewRefresh();
+            }
+            return Status.OK_STATUS;
+        });
+        job.setSystem(true);
+        job.schedule();
+    }
+
+    private static boolean isIgnoredReviewPath(String fullPath) {
+        return fullPath.contains("/.equimacs-review/")
+            || fullPath.endsWith("/.equimacs-review")
+            || fullPath.startsWith(".equimacs-review/")
+            || fullPath.contains("/.git/")
+            || fullPath.endsWith("/.git");
     }
 
     @Override
@@ -103,7 +223,19 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
                 triggerViewRefresh();
                 yield comment;
             }
-            case Request.ListReviewComments r -> store.list(r.file());
+            case Request.ListReviewComments r -> {
+                ReviewStoreCore.ReanchorReport report = store.reanchorAll();
+                if (report.modified()) {
+                    ReviewMarkerManager.reconcile(store.list(null));
+                    triggerViewRefresh();
+                }
+                GitDiffModel.FilterMode mode = GitDiffModel.FilterMode.parse(r.filter());
+                List<ReviewComment> comments = store.list(r.file());
+                if (mode != GitDiffModel.FilterMode.ALL) {
+                    comments = gitDiffService.filter(comments, mode);
+                }
+                yield comments;
+            }
             case Request.ReplyToComment r -> {
                 ReviewComment updated = store.addReply(r.commentId(), r.author(), r.text());
                 triggerViewRefresh();
@@ -128,6 +260,7 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
     }
 
     private Map<String, Object> reviewDiagnostics(String file) throws Exception {
+        store.reanchorAll();
         List<ReviewComment> comments = store.list(file);
         ReviewMarkerManager.reconcile(store.list(null));
 
@@ -145,7 +278,34 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
         result.put("comments", comments);
         result.put("markers", ReviewMarkerManager.diagnostics(file));
         result.put("annotationPreferences", prefValues);
+        result.put("anchorCounts", countAnchorStatuses(comments));
         return result;
+    }
+
+    private static Map<String, Integer> countAnchorStatuses(List<ReviewComment> comments) {
+        int exact = 0;
+        int relocated = 0;
+        int stale = 0;
+        int unanchored = 0;
+        for (ReviewComment c : comments) {
+            LineAnchor anchor = c.anchor();
+            if (anchor == null || anchor.status() == null) {
+                unanchored++;
+                continue;
+            }
+            switch (anchor.status()) {
+                case LineAnchor.STATUS_EXACT -> exact++;
+                case LineAnchor.STATUS_RELOCATED -> relocated++;
+                case LineAnchor.STATUS_STALE -> stale++;
+                default -> unanchored++;
+            }
+        }
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        counts.put("exact", exact);
+        counts.put("relocated", relocated);
+        counts.put("stale", stale);
+        counts.put("unanchored", unanchored);
+        return counts;
     }
 
     private Map<String, Object> openFile(String filePath, int line, int endLine) {
@@ -170,19 +330,31 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
                 int length = 0;
                 int resolvedStart = line;
                 int resolvedEnd = endLine;
-                if (line > 0 && editor instanceof ITextEditor textEditor) {
+                boolean highlighted = false;
+                ITextEditor textEditor = editor instanceof ITextEditor te
+                    ? te
+                    : (editor != null ? editor.getAdapter(ITextEditor.class) : null);
+                if (line > 0 && textEditor != null) {
                     IDocumentProvider provider = textEditor.getDocumentProvider();
                     IDocument doc = provider != null ? provider.getDocument(textEditor.getEditorInput()) : null;
                     if (doc != null && doc.getNumberOfLines() > 0) {
-                        resolvedStart = Math.max(1, Math.min(line, doc.getNumberOfLines()));
-                        resolvedEnd = endLine >= resolvedStart
-                            ? Math.min(endLine, doc.getNumberOfLines())
-                            : resolvedStart;
-                        IRegion startInfo = doc.getLineInformation(resolvedStart - 1);
-                        IRegion endInfo = doc.getLineInformation(resolvedEnd - 1);
-                        offset = startInfo.getOffset();
-                        length = Math.max(0, (endInfo.getOffset() + endInfo.getLength()) - offset);
-                        textEditor.selectAndReveal(offset, length);
+                        EditorHighlightCore.HighlightRange range = EditorHighlightCore.computeRange(
+                            doc.getNumberOfLines(),
+                            line,
+                            endLine,
+                            idx -> safeLineOffset(doc, idx),
+                            idx -> safeLineLength(doc, idx),
+                            EditorHighlightCore.DEFAULT_DURATION_MS);
+                        if (range != null) {
+                            resolvedStart = range.startLine();
+                            resolvedEnd = range.endLine();
+                            offset = range.offset();
+                            length = range.length();
+                            textEditor.selectAndReveal(offset, length);
+                            EditorHighlightManager.highlight(
+                                textEditor, doc, offset, length, EditorHighlightCore.DEFAULT_DURATION_MS);
+                            highlighted = true;
+                        }
                     }
                 }
                 Map<String, Object> result = new LinkedHashMap<>();
@@ -192,12 +364,29 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
                 result.put("endLine", resolvedEnd);
                 result.put("offset", offset);
                 result.put("length", length);
+                result.put("highlighted", highlighted);
                 result.put("editorTitle", editor != null ? editor.getTitle() : null);
                 return result;
             } catch (Exception e) {
                 throw new IllegalStateException("Failed to open editor: " + e.getMessage(), e);
             }
         });
+    }
+
+    private static int safeLineOffset(IDocument doc, int lineIndex) {
+        try {
+            return doc.getLineInformation(lineIndex).getOffset();
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private static int safeLineLength(IDocument doc, int lineIndex) {
+        try {
+            return doc.getLineInformation(lineIndex).getLength();
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private Map<String, Object> eclipseCommand(
@@ -302,15 +491,20 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
         if (member instanceof IFile file) {
             return file;
         }
-        IFile[] files = ResourcesPlugin.getWorkspace().getRoot().findFilesForLocationURI(
-            java.net.URI.create("file:///" + pathStr.replace("\\", "/")));
+        java.net.URI uri;
+        try {
+            uri = java.nio.file.Path.of(pathStr).toUri();
+        } catch (java.nio.file.InvalidPathException e) {
+            uri = java.net.URI.create("file:///" + pathStr.replace("\\", "/").replace(" ", "%20"));
+        }
+        IFile[] files = ResourcesPlugin.getWorkspace().getRoot().findFilesForLocationURI(uri);
         return files.length > 0 ? files[0] : null;
     }
 
     private Map<String, Object> eclipseWorkbench() {
         return uiRead(() -> {
             Map<String, Object> result = new LinkedHashMap<>();
-            Display display = Display.getDefault();
+            Display display = workbenchDisplay();
             result.put("displayAvailable", display != null && !display.isDisposed());
             result.put("workbenchRunning", PlatformUI.isWorkbenchRunning());
             WorkbenchState state = activeWorkbenchState();
@@ -365,9 +559,26 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
         });
     }
 
+    private static Display workbenchDisplay() {
+        if (!PlatformUI.isWorkbenchRunning()) {
+            return null;
+        }
+        IWorkbench workbench;
+        try {
+            workbench = PlatformUI.getWorkbench();
+        } catch (IllegalStateException e) {
+            return null;
+        }
+        if (workbench == null || workbench.isClosing()) {
+            return null;
+        }
+        Display display = workbench.getDisplay();
+        return (display != null && !display.isDisposed()) ? display : null;
+    }
+
     private static Map<String, Object> uiRead(DiagnosticSupplier supplier) {
-        Display display = Display.getDefault();
-        if (display == null || display.isDisposed()) {
+        Display display = workbenchDisplay();
+        if (display == null) {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("available", false);
             result.put("reason", "SWT display unavailable");
@@ -537,8 +748,8 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
     }
 
     private void triggerViewRefresh() {
-        Display d = Display.getDefault();
-        if (d != null && !d.isDisposed()) {
+        Display d = workbenchDisplay();
+        if (d != null) {
             d.asyncExec(ReviewView::refresh);
         }
     }

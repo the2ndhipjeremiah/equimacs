@@ -20,13 +20,16 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import org.apache.felix.service.command.CommandProcessor;
 import org.apache.felix.service.command.CommandSession;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.Platform;
 import org.equimacs.eclipse.bridge.Activator;
+import org.equimacs.eclipse.bridge.BridgeProtocol;
 import org.equimacs.eclipse.bridge.BridgeServer;
 import org.equimacs.eclipse.bridge.api.IBridgeCommandHandler;
 import org.equimacs.eclipse.bridge.api.IBridgeService;
@@ -46,6 +49,7 @@ public final class BridgeServiceImpl implements IBridgeService {
     private static final String APP_BUNDLE_ID = "org.equimacs.eclipse.app";
 
     private final BlockingQueue<JsonObject> eventQueue = new LinkedBlockingQueue<>();
+    private final CopyOnWriteArrayList<Consumer<JsonObject>> eventListeners = new CopyOnWriteArrayList<>();
     private final Map<String, IBridgeCommandHandler> dispatchMap = new ConcurrentHashMap<>();
 
     private volatile BundleContext ctx;
@@ -63,6 +67,7 @@ public final class BridgeServiceImpl implements IBridgeService {
         stopping = true;
         Activator.logInfo("BridgeServiceImpl deactivating; clearing " + dispatchMap.size() + " handler(s)");
         dispatchMap.clear();
+        eventListeners.clear();
         BridgeServer running = server;
         server = null;
         if (running != null) {
@@ -78,6 +83,44 @@ public final class BridgeServiceImpl implements IBridgeService {
     @Override
     public void publishEvent(JsonObject event) {
         eventQueue.offer(event);
+        for (Consumer<JsonObject> listener : eventListeners) {
+            try {
+                listener.accept(event);
+            } catch (Throwable t) {
+                Activator.logError("Bridge event listener error", t);
+            }
+        }
+    }
+
+    @Override
+    public void addEventListener(Consumer<JsonObject> listener) {
+        if (listener != null) {
+            eventListeners.addIfAbsent(listener);
+        }
+    }
+
+    @Override
+    public void removeEventListener(Consumer<JsonObject> listener) {
+        if (listener != null) {
+            eventListeners.remove(listener);
+        }
+    }
+
+    @Override
+    public Response dispatchJson(String requestType, String paramsJson) {
+        if (requestType == null || requestType.isBlank()) {
+            return new Response.Error("Request type must not be blank", null);
+        }
+        String trimmedType = requestType.trim();
+        if ("Shutdown".equals(trimmedType) || "Reload".equals(trimmedType) || "GogoExec".equals(trimmedType)) {
+            return new Response.Error("Request type not allowed from view bridge: " + trimmedType, null);
+        }
+        try {
+            Request req = BridgeProtocol.deserializeTyped(trimmedType, paramsJson);
+            return dispatch(req);
+        } catch (Exception e) {
+            return new Response.Error(e.getMessage(), null);
+        }
     }
 
     void addHandler(IBridgeCommandHandler handler, Map<String, Object> props) {
@@ -119,6 +162,7 @@ public final class BridgeServiceImpl implements IBridgeService {
         return cleaned.toArray(String[]::new);
     }
 
+    @Override
     public Response dispatch(Request req) {
         Activator.logInfo("Dispatching request: " + req.getClass().getSimpleName());
         try {

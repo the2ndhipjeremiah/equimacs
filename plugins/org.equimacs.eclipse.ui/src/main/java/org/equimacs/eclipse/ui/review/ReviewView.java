@@ -41,6 +41,7 @@ import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
+import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Label;
@@ -64,9 +65,12 @@ public class ReviewView extends ViewPart {
     private static volatile ReviewView instance;
 
     private final ReviewStore store = new ReviewStore();
+    private final GitDiffService gitDiffService = new GitDiffService();
 
     private TreeViewer viewer;
     private Button hideResolvedCheck;
+    private Combo gitFilterCombo;
+    private Button refreshButton;
     private Text filterText;
     private Label countsLabel;
     private Label detailHeaderLabel;
@@ -78,6 +82,7 @@ public class ReviewView extends ViewPart {
     private Button replyButton;
 
     private List<ReviewComment> allComments = List.of();
+    private Map<java.nio.file.Path, GitDiffModel.GitDiffSummary> gitDiffCache = new LinkedHashMap<>();
     private String selectedCommentId;
 
     @Override
@@ -106,7 +111,7 @@ public class ReviewView extends ViewPart {
     private void createFilterBar(Composite parent) {
         Composite bar = new Composite(parent, SWT.NONE);
         bar.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
-        GridLayout layout = new GridLayout(3, false);
+        GridLayout layout = new GridLayout(5, false);
         layout.marginWidth = 0;
         layout.marginHeight = 0;
         bar.setLayout(layout);
@@ -116,6 +121,18 @@ public class ReviewView extends ViewPart {
         filterText.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
         filterText.addModifyListener(e -> applyFilterAndRefresh(selectedCommentId));
 
+        gitFilterCombo = new Combo(bar, SWT.DROP_DOWN | SWT.READ_ONLY);
+        gitFilterCombo.setItems("All files", "Changed files (git)", "Changed hunks (git)");
+        gitFilterCombo.select(0);
+        gitFilterCombo.setLayoutData(new GridData(SWT.BEGINNING, SWT.CENTER, false, false));
+        gitFilterCombo.addSelectionListener(new SelectionAdapter() {
+            @Override
+            public void widgetSelected(SelectionEvent e) {
+                refreshGitSnapshot();
+                applyFilterAndRefresh(selectedCommentId);
+            }
+        });
+
         hideResolvedCheck = new Button(bar, SWT.CHECK);
         hideResolvedCheck.setText("Hide resolved");
         hideResolvedCheck.setSelection(true);
@@ -123,6 +140,16 @@ public class ReviewView extends ViewPart {
             @Override
             public void widgetSelected(SelectionEvent e) {
                 applyFilterAndRefresh(selectedCommentId);
+            }
+        });
+
+        refreshButton = new Button(bar, SWT.PUSH);
+        refreshButton.setText("Refresh");
+        refreshButton.setLayoutData(new GridData(SWT.BEGINNING, SWT.CENTER, false, false));
+        refreshButton.addSelectionListener(new SelectionAdapter() {
+            @Override
+            public void widgetSelected(SelectionEvent e) {
+                reload(selectedCommentId);
             }
         });
 
@@ -301,8 +328,39 @@ public class ReviewView extends ViewPart {
     }
 
     private void reload(String preserveCommentId) {
+        try {
+            store.reanchorAll();
+        } catch (Exception e) {
+            // Best-effort reanchor before loading comments.
+        }
         allComments = loadComments();
+        if (activeGitFilterMode() != GitDiffModel.FilterMode.ALL) {
+            refreshGitSnapshot();
+        } else {
+            gitDiffCache = new LinkedHashMap<>();
+        }
         applyFilterAndRefresh(preserveCommentId);
+    }
+
+    private GitDiffModel.FilterMode activeGitFilterMode() {
+        if (gitFilterCombo == null || gitFilterCombo.isDisposed()) {
+            return GitDiffModel.FilterMode.ALL;
+        }
+        return switch (gitFilterCombo.getSelectionIndex()) {
+            case 1 -> GitDiffModel.FilterMode.CHANGED_FILES;
+            case 2 -> GitDiffModel.FilterMode.CHANGED_HUNKS;
+            default -> GitDiffModel.FilterMode.ALL;
+        };
+    }
+
+    private void refreshGitSnapshot() {
+        Map<java.nio.file.Path, GitDiffModel.GitDiffSummary> nextCache = new LinkedHashMap<>();
+        if (activeGitFilterMode() != GitDiffModel.FilterMode.ALL) {
+            for (ReviewComment c : allComments) {
+                gitDiffService.summaryForWorkspaceFile(c.file(), nextCache);
+            }
+        }
+        gitDiffCache = nextCache;
     }
 
     private void applyFilterAndRefresh(String preserveCommentId) {
@@ -310,6 +368,7 @@ public class ReviewView extends ViewPart {
             return;
         }
         boolean hideResolved = hideResolvedCheck != null && hideResolvedCheck.getSelection();
+        GitDiffModel.FilterMode gitMode = activeGitFilterMode();
         String query = filterText != null ? filterText.getText().trim().toLowerCase(Locale.ROOT) : "";
 
         long openCount = allComments.stream().filter(c -> !c.resolved()).count();
@@ -325,6 +384,9 @@ public class ReviewView extends ViewPart {
 
         for (ReviewComment c : sorted) {
             if (hideResolved && c.resolved()) {
+                continue;
+            }
+            if (gitMode != GitDiffModel.FilterMode.ALL && !gitDiffService.matches(c, gitMode, gitDiffCache)) {
                 continue;
             }
             if (!query.isEmpty() && !matchesQuery(c, query)) {
@@ -409,7 +471,9 @@ public class ReviewView extends ViewPart {
         }
 
         String status = comment.resolved() ? "[RESOLVED]" : "[OPEN]";
-        detailHeaderLabel.setText(comment.file() + ":" + comment.line() + "  " + status);
+        String anchorDecoration = formatAnchorDecoration(comment.anchor());
+        String suffix = anchorDecoration.isEmpty() ? "" : "  " + anchorDecoration;
+        detailHeaderLabel.setText(comment.file() + ":" + comment.line() + "  " + status + suffix);
         resolveButton.setText(comment.resolved() ? "Reopen" : "Resolve");
 
         renderCodeSnippet(comment.file(), comment.line());
@@ -573,8 +637,9 @@ public class ReviewView extends ViewPart {
             IEditorPart editor = IDE.openEditor(page, iFile);
             if (editor instanceof ITextEditor textEditor && line > 0) {
                 IDocument doc = textEditor.getDocumentProvider().getDocument(textEditor.getEditorInput());
-                if (doc != null) {
-                    int offset = doc.getLineOffset(line - 1);
+                if (doc != null && doc.getNumberOfLines() > 0) {
+                    int clampedLine = Math.max(1, Math.min(line, doc.getNumberOfLines()));
+                    int offset = doc.getLineOffset(clampedLine - 1);
                     textEditor.selectAndReveal(offset, 0);
                 }
             }
@@ -630,10 +695,16 @@ public class ReviewView extends ViewPart {
                 case ReviewComment c -> {
                     StyledString ss = new StyledString();
                     ss.append("L" + c.line() + " ", StyledString.QUALIFIER_STYLER);
+                    if (c.anchor() != null && LineAnchor.STATUS_RELOCATED.equals(c.anchor().status())) {
+                        ss.append("(moved) ", StyledString.DECORATIONS_STYLER);
+                    }
                     if (c.resolved()) {
                         ss.append("[RESOLVED] ", StyledString.DECORATIONS_STYLER);
                     } else {
                         ss.append("[OPEN] ", StyledString.COUNTER_STYLER);
+                    }
+                    if (c.anchor() != null && LineAnchor.STATUS_STALE.equals(c.anchor().status())) {
+                        ss.append("[STALE] ", StyledString.DECORATIONS_STYLER);
                     }
                     ss.append(c.author() + ": " + c.text());
                     int count = c.replies().size();
@@ -651,5 +722,16 @@ public class ReviewView extends ViewPart {
         public String getText(Object element) {
             return getStyledText(element).getString();
         }
+    }
+
+    private static String formatAnchorDecoration(LineAnchor anchor) {
+        if (anchor == null || anchor.status() == null) {
+            return "";
+        }
+        return switch (anchor.status()) {
+            case LineAnchor.STATUS_STALE -> "[STALE]";
+            case LineAnchor.STATUS_RELOCATED -> "(moved)";
+            default -> "";
+        };
     }
 }

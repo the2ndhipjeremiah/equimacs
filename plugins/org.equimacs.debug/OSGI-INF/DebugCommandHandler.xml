@@ -45,6 +45,10 @@ RunTests
 GetTestResults
 GetConsoleOutput
 ClearConsoleOutput
+InspectFrame
+InspectValue
+InspectSymbol
+ListInspectProviders
    </property>
    <reference name="bridge"
               interface="org.equimacs.eclipse.bridge.api.IBridgeService"
@@ -52,4 +56,11 @@ ClearConsoleOutput
               policy="static"
               bind="setBridge"
               unbind="unsetBridge"/>
+   <reference name="viewProviders"
+              interface="org.equimacs.eclipse.bridge.api.IMoldableViewProvider"
+              cardinality="0..n"
+              policy="dynamic"
+              policy-option="greedy"
+              bind="addViewProvider"
+              unbind="removeViewProvider"/>
 </scr:component>

@@ -61,7 +61,11 @@ public sealed interface Request {
 
     // --- Review ---
     record AddReviewComment(String file, int line, String author, String text) implements Request {}
-    record ListReviewComments(String file) implements Request {}
+    record ListReviewComments(String file, String filter) implements Request {
+        public ListReviewComments(String file) {
+            this(file, null);
+        }
+    }
     record ReplyToComment(String commentId, String author, String text) implements Request {}
     record ResolveComment(String commentId) implements Request {}
     record ReviewDiagnostics(String file) implements Request {}
@@ -100,6 +104,36 @@ public sealed interface Request {
     // --- UI Workbench Commands ---
     record EclipseCommand(String commandId, String file, int offset, java.util.Map<String, String> params) implements Request {}
     record ShowView(String viewId, String secondaryId) implements Request {}
+
+    // --- UI Inspection & Widget Driving ---
+    record UiTree(String root, int maxDepth, Boolean visibleOnly, String textFilter, String widgetType) implements Request {}
+    record UiClick(String widgetId, String root, String widgetType, String text, int index, String itemText, Boolean doubleClick) implements Request {}
+    record UiType(String widgetId, String root, String widgetType, String text, int index, String value, Boolean append, Boolean submit) implements Request {}
+
+    // --- Moddable View Host ---
+    record ViewOpen(String viewId, String title, String specJson) implements Request {}
+    record ViewUpdate(String viewId, String title, String specJson) implements Request {}
+    record ViewClose(String viewId) implements Request {}
+    record ViewList() implements Request {}
+
+    // --- Moldable Inspector ---
+    record InspectFrame(long frameId, Boolean openView, String viewId) implements Request {}
+    record InspectValue(long frameId, String expression, int depth, Boolean openView, String viewId) implements Request {}
+    record InspectSymbol(String file, int offset, Boolean openView, String viewId) implements Request {}
+    record ListInspectProviders() implements Request {}
+
+    // --- Built-in Moldable Toolkit Views ---
+    record OpenCallExplorer(
+        String file,
+        int offset,
+        String direction,
+        int depth,
+        Boolean hideJdk,
+        String viewMode,
+        String viewId
+    ) implements Request {}
+    record OpenTraceView(int limit, Boolean live, String viewId) implements Request {}
+    record OpenJUnitView(String runId, Boolean failuresOnly, Boolean live, String viewId) implements Request {}
 
     /**
      * Types of stepping available.

@@ -15,13 +15,18 @@ import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Path;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.jdt.core.ICompilationUnit;
+import org.eclipse.jdt.core.IField;
 import org.eclipse.jdt.core.IJavaElement;
+import org.eclipse.jdt.core.ILocalVariable;
+import org.eclipse.jdt.core.IMember;
 import org.eclipse.jdt.core.IMethod;
 import org.eclipse.jdt.core.ISourceRange;
+import org.eclipse.jdt.core.ISourceReference;
 import org.eclipse.jdt.core.IType;
 import org.eclipse.jdt.core.ITypeHierarchy;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.JavaModelException;
+import org.eclipse.jdt.core.Signature;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTParser;
@@ -51,7 +56,63 @@ final class JavaNavigationService {
     Map<String, Object> findReferences(String filePath, int offset) throws CoreException {
         ICompilationUnit unit = requireCompilationUnit(filePath);
         IJavaElement target = selectSymbol(unit, offset, filePath);
+        return findReferencesFor(target);
+    }
 
+    Map<String, Object> callHierarchy(
+            String filePath, int offset, String direction, int depth) throws CoreException {
+        ICompilationUnit unit = requireCompilationUnit(filePath);
+        IJavaElement selected = selectSymbol(unit, offset, filePath);
+        IMethod method = resolveMethod(selected);
+        if (method == null) {
+            throw error("Selected symbol is not a method: " + selected.getElementName());
+        }
+        return callHierarchyFor(method, direction, depth);
+    }
+
+    Map<String, Object> typeHierarchy(String filePath, int offset) throws CoreException {
+        ICompilationUnit unit = requireCompilationUnit(filePath);
+        IJavaElement selected = selectSymbol(unit, offset, filePath);
+        IType type = resolveType(selected, unit);
+        if (type == null) {
+            throw error("No Java type found at offset " + offset + " in " + filePath);
+        }
+        return typeHierarchyFor(type);
+    }
+
+    Map<String, Object> inspectSymbolData(String filePath, int offset) throws CoreException {
+        ICompilationUnit unit = requireCompilationUnit(filePath);
+        IJavaElement selected = selectSymbol(unit, offset, filePath);
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("target", describeSymbolTarget(selected, offset));
+
+        IType type = resolveType(selected, unit);
+        if (type != null) {
+            data.put("members", extractMembers(type));
+            try {
+                data.put("hierarchy", typeHierarchyFor(type));
+            } catch (Exception ignored) {}
+        }
+
+        try {
+            Map<String, Object> refsResult = findReferencesFor(selected);
+            data.put("references", refsResult.get("references"));
+        } catch (Exception ignored) {}
+
+        IMethod method = resolveMethod(selected);
+        if (method != null) {
+            try {
+                data.put("callers", callHierarchyFor(method, "callers", 2).get("nodes"));
+            } catch (Exception ignored) {}
+            try {
+                data.put("callees", callHierarchyFor(method, "callees", 2).get("nodes"));
+            } catch (Exception ignored) {}
+        }
+        return data;
+    }
+
+    private Map<String, Object> findReferencesFor(IJavaElement target) throws CoreException {
         List<Map<String, Object>> references = new ArrayList<>();
         SearchPattern pattern = SearchPattern.createPattern(target, IJavaSearchConstants.REFERENCES);
         if (pattern != null) {
@@ -89,15 +150,8 @@ final class JavaNavigationService {
         return result;
     }
 
-    Map<String, Object> callHierarchy(
-            String filePath, int offset, String direction, int depth) throws CoreException {
-        ICompilationUnit unit = requireCompilationUnit(filePath);
-        IJavaElement selected = selectSymbol(unit, offset, filePath);
-        IMethod method = resolveMethod(selected);
-        if (method == null) {
-            throw error("Selected symbol is not a method: " + selected.getElementName());
-        }
-
+    private Map<String, Object> callHierarchyFor(
+            IMethod method, String direction, int depth) throws CoreException {
         String dir = (direction == null || direction.isBlank())
             ? "callers"
             : direction.trim().toLowerCase();
@@ -120,14 +174,7 @@ final class JavaNavigationService {
         return result;
     }
 
-    Map<String, Object> typeHierarchy(String filePath, int offset) throws CoreException {
-        ICompilationUnit unit = requireCompilationUnit(filePath);
-        IJavaElement selected = selectSymbol(unit, offset, filePath);
-        IType type = resolveType(selected, unit);
-        if (type == null) {
-            throw error("No Java type found at offset " + offset + " in " + filePath);
-        }
-
+    private Map<String, Object> typeHierarchyFor(IType type) throws JavaModelException {
         ITypeHierarchy hierarchy = type.newTypeHierarchy(new NullProgressMonitor());
         IType superclass = hierarchy.getSuperclass(type);
         IType[] allSupers = hierarchy.getAllSuperclasses(type);
@@ -141,6 +188,135 @@ final class JavaNavigationService {
         result.put("interfaces", describeTypes(interfaces));
         result.put("subtypes", describeTypes(subtypes));
         return result;
+    }
+
+    private static Map<String, Object> describeSymbolTarget(IJavaElement element, int fallbackOffset) {
+        Map<String, Object> info = new LinkedHashMap<>(describeElement(element));
+        if (element instanceof IType type) {
+            info.put("fqn", type.getFullyQualifiedName());
+            info.put("signature", typeSignatureLabel(type));
+        } else if (element instanceof IMember member) {
+            IType declaring = member.getDeclaringType();
+            if (declaring != null) {
+                String declaringFqn = declaring.getFullyQualifiedName();
+                info.put("declaringType", declaringFqn);
+                info.put("fqn", declaringFqn + "#" + member.getElementName());
+            }
+            if (element instanceof IMethod method) {
+                info.put("signature", methodSignatureLabel(method));
+            } else if (element instanceof IField field) {
+                info.put("signature", fieldSignatureLabel(field));
+            }
+        } else if (element instanceof ILocalVariable local) {
+            info.put("signature", localSignatureLabel(local));
+        }
+
+        IResource resource = element.getResource();
+        int symOffset = fallbackOffset;
+        int line = -1;
+        if (element instanceof ISourceReference sourceRef) {
+            try {
+                ISourceRange range = sourceRef.getNameRange();
+                if (range == null || range.getOffset() < 0) {
+                    range = sourceRef.getSourceRange();
+                }
+                if (range != null && range.getOffset() >= 0) {
+                    symOffset = range.getOffset();
+                    line = lineAtOffset(resource, symOffset);
+                }
+            } catch (JavaModelException ignored) {}
+        }
+        info.put("offset", symOffset);
+        info.put("line", line);
+        return info;
+    }
+
+    private static List<Map<String, Object>> extractMembers(IType type) throws JavaModelException {
+        List<Map<String, Object>> members = new ArrayList<>();
+        IResource typeRes = type.getResource();
+        String typeFile = typeRes != null ? typeRes.getFullPath().toString() : null;
+        Document typeDoc = readDocument(typeRes);
+
+        for (IField field : type.getFields()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("kind", "field");
+            item.put("name", field.getElementName());
+            item.put("signature", fieldSignatureLabel(field));
+            IResource res = field.getResource() != null ? field.getResource() : typeRes;
+            item.put("file", res != null ? res.getFullPath().toString() : typeFile);
+            ISourceRange range = field.getNameRange();
+            Document doc = (res == typeRes) ? typeDoc : readDocument(res);
+            item.put("line", range != null ? lineAtOffset(doc, range.getOffset()) : -1);
+            members.add(item);
+        }
+
+        for (IMethod method : type.getMethods()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("kind", method.isConstructor() ? "constructor" : "method");
+            item.put("name", method.getElementName());
+            item.put("signature", methodSignatureLabel(method));
+            IResource res = method.getResource() != null ? method.getResource() : typeRes;
+            item.put("file", res != null ? res.getFullPath().toString() : typeFile);
+            ISourceRange range = method.getNameRange();
+            Document doc = (res == typeRes) ? typeDoc : readDocument(res);
+            item.put("line", range != null ? lineAtOffset(doc, range.getOffset()) : -1);
+            members.add(item);
+        }
+        return members;
+    }
+
+    private static String typeSignatureLabel(IType type) {
+        try {
+            if (type.isInterface()) {
+                return "interface";
+            }
+            if (type.isEnum()) {
+                return "enum";
+            }
+            if (type.isRecord()) {
+                return "record";
+            }
+            return "class";
+        } catch (JavaModelException ignored) {
+            return "type";
+        }
+    }
+
+    private static String methodSignatureLabel(IMethod method) {
+        try {
+            return Signature.toString(
+                method.getSignature(),
+                method.getElementName(),
+                method.getParameterNames(),
+                false,
+                !method.isConstructor());
+        } catch (Exception ignored) {
+            try {
+                return method.getSignature();
+            } catch (JavaModelException ex) {
+                return method.getElementName();
+            }
+        }
+    }
+
+    private static String fieldSignatureLabel(IField field) {
+        try {
+            return Signature.toString(field.getTypeSignature());
+        } catch (Exception ignored) {
+            try {
+                return field.getTypeSignature();
+            } catch (JavaModelException ex) {
+                return "";
+            }
+        }
+    }
+
+    private static String localSignatureLabel(ILocalVariable local) {
+        try {
+            return Signature.toString(local.getTypeSignature());
+        } catch (Exception ignored) {
+            return local.getTypeSignature();
+        }
     }
 
     private List<Map<String, Object>> collectCallers(
@@ -363,17 +539,30 @@ final class JavaNavigationService {
         };
     }
 
-    private static int lineAtOffset(IResource resource, int offset) {
-        if (!(resource instanceof IFile file) || offset < 0) {
+    private static Document readDocument(IResource resource) {
+        if (!(resource instanceof IFile file)) {
+            return null;
+        }
+        try {
+            return new Document(file.readString());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static int lineAtOffset(Document doc, int offset) {
+        if (doc == null || offset < 0) {
             return -1;
         }
         try {
-            String content = file.readString();
-            Document doc = new Document(content);
             return doc.getLineOfOffset(Math.min(offset, doc.getLength())) + 1;
         } catch (Exception e) {
             return -1;
         }
+    }
+
+    private static int lineAtOffset(IResource resource, int offset) {
+        return lineAtOffset(readDocument(resource), offset);
     }
 
     private static String lineSnippet(IResource resource, int line) {
@@ -401,8 +590,13 @@ final class JavaNavigationService {
         if (resource != null) {
             return resource;
         }
-        IResource[] resources = ResourcesPlugin.getWorkspace().getRoot().findFilesForLocationURI(
-            java.net.URI.create("file:///" + pathStr.replace("\\", "/")));
+        java.net.URI uri;
+        try {
+            uri = java.nio.file.Path.of(pathStr).toUri();
+        } catch (java.nio.file.InvalidPathException e) {
+            uri = java.net.URI.create("file:///" + pathStr.replace("\\", "/").replace(" ", "%20"));
+        }
+        IResource[] resources = ResourcesPlugin.getWorkspace().getRoot().findFilesForLocationURI(uri);
         return resources.length > 0 ? resources[0] : null;
     }
 
