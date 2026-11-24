@@ -37,7 +37,9 @@ import org.eclipse.swt.widgets.Menu;
  */
 public final class GraphCanvasRenderer {
 
-    private static final String HINT_TEXT =
+    private static final String FOCUS_HINT_TEXT =
+        "Callers -> [Focus] -> Callees | Double-click: Open | Shift+Click / Right-click: Focus | Drag: Pan | Wheel: Zoom";
+    private static final String LAYERED_HINT_TEXT =
         "Double-click: Open | Shift+Click / Right-click: Focus | Drag: Pan | Wheel: Zoom";
     private static final double WHEEL_ZOOM_STEP = 1.12;
     private static final double BUTTON_ZOOM_STEP = 1.25;
@@ -77,7 +79,7 @@ public final class GraphCanvasRenderer {
         resetBtn.setText("Reset");
 
         Label hintLabel = new Label(bar, SWT.WRAP);
-        hintLabel.setText(HINT_TEXT);
+        hintLabel.setText("focus".equals(spec.layout()) ? FOCUS_HINT_TEXT : LAYERED_HINT_TEXT);
         hintLabel.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
 
         Canvas canvas = new Canvas(container, SWT.DOUBLE_BUFFERED | SWT.BORDER);

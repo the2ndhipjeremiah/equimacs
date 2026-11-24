@@ -80,7 +80,7 @@ final class ToolkitSpecsCoreTest {
         assertNull(parsed.live());
         ViewSpec.TreeSpec tree = assertInstanceOf(ViewSpec.TreeSpec.class, parsed.spec());
         assertTrue(tree.expandAll());
-        assertEquals(List.of("Method", "Type", "Location", "Snippet"), tree.columns());
+        assertEquals(List.of("Method", "Type", "Call Site", "Snippet"), tree.columns());
         assertTrue(tree.title().contains("d=5"));
         assertTrue(tree.title().contains("1 JDK filtered"));
 
@@ -93,8 +93,10 @@ final class ToolkitSpecsCoreTest {
         assertEquals("/proj/src/Main.java", openMain.file());
         assertEquals(10, openMain.line());
 
-        // Toolbar has toolkit-view controls and Inspect Symbol action.
+        // Toolbar has toolkit-view controls (with active markers) and Inspect Symbol action.
         assertEquals(9, tree.toolbar().size());
+        assertEquals("* Callers", tree.toolbar().get(0).label());
+        assertEquals("* Depth 5", tree.toolbar().get(5).label());
         ViewSpec.ActionItem inspectItem = tree.toolbar().get(8);
         assertEquals("Inspect Symbol", inspectItem.label());
         ViewAction.Inspect inspectAction = assertInstanceOf(ViewAction.Inspect.class, inspectItem.action());
@@ -156,11 +158,11 @@ final class ToolkitSpecsCoreTest {
               "depth": 3,
               "nodes": [
                 {
-                  "element": { "name": "step", "kind": "method", "file": "/proj/src/Calc.java", "declaringType": "demo.Calc" },
+                  "element": { "name": "step", "kind": "method", "file": "/proj/src/Helper.java", "declaringType": "demo.Helper", "line": 12, "offset": 180 },
                   "file": "/proj/src/Calc.java",
                   "line": 40,
                   "offset": 410,
-                  "snippet": "step();",
+                  "snippet": "helper.step();",
                   "children": [
                     {
                       "element": { "name": "compute", "kind": "method", "file": "/proj/src/Calc.java", "declaringType": "demo.Calc" },
@@ -230,11 +232,16 @@ final class ToolkitSpecsCoreTest {
         assertEquals("right", calleeNode.group());
         assertEquals(1, calleeNode.layer());
         assertEquals("CALLEE", calleeNode.badge());
+        assertEquals("Helper : 12", calleeNode.sublabel());
+        ViewAction.OpenFile openCalleeDecl = assertInstanceOf(ViewAction.OpenFile.class, calleeNode.onActivate());
+        assertEquals("/proj/src/Helper.java", openCalleeDecl.file());
+        assertEquals(12, openCalleeDecl.line());
         ViewAction.ToolkitView secondaryAction =
             assertInstanceOf(ViewAction.ToolkitView.class, calleeNode.onSecondary());
         assertEquals("call-explorer", secondaryAction.tool());
         assertEquals("hybrid", secondaryAction.params().get("viewMode"));
-        assertEquals("410", secondaryAction.params().get("offset"));
+        assertEquals("/proj/src/Helper.java", secondaryAction.params().get("file"));
+        assertEquals("180", secondaryAction.params().get("offset"));
 
         ViewSpec.GraphNode recursiveNode = graph.nodes().stream()
             .filter(n -> "RECURSIVE".equals(n.badge()))

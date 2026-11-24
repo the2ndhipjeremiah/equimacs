@@ -356,8 +356,11 @@ final class JavaNavigationService {
             node.put("line", line);
             node.put("offset", match.getOffset());
             node.put("snippet", lineSnippet(resource, line));
-            if (remainingDepth > 1 && visited.add(caller.getHandleIdentifier())) {
-                node.put("children", collectCallers(caller, remainingDepth - 1, visited));
+            String callerHandle = caller.getHandleIdentifier();
+            if (remainingDepth > 1 && !visited.contains(callerHandle)) {
+                Set<String> nextVisited = new HashSet<>(visited);
+                nextVisited.add(callerHandle);
+                node.put("children", collectCallers(caller, remainingDepth - 1, nextVisited));
             } else {
                 node.put("children", List.of());
             }
@@ -385,36 +388,44 @@ final class JavaNavigationService {
         }
 
         ISourceRange targetRange = target.getSourceRange();
+        if (targetRange == null || targetRange.getOffset() < 0) {
+            return List.of();
+        }
+        int targetStart = targetRange.getOffset();
+        int targetEnd = targetStart + targetRange.getLength();
+
         List<Map<String, Object>> nodes = new ArrayList<>();
         astRoot.accept(new ASTVisitor() {
             @Override
             public boolean visit(MethodDeclaration node) {
                 int start = node.getStartPosition();
                 int end = start + node.getLength();
-                return start <= targetRange.getOffset()
-                    && end >= targetRange.getOffset() + targetRange.getLength();
+                return start <= targetStart && end >= targetEnd;
             }
 
             @Override
             public boolean visit(MethodInvocation node) {
-                addCallee(node.resolveMethodBinding(), node.getStartPosition());
+                int nameOffset = node.getName() != null ? node.getName().getStartPosition() : node.getStartPosition();
+                addCallee(node.resolveMethodBinding(), nameOffset);
                 return true;
             }
 
             @Override
             public boolean visit(SuperMethodInvocation node) {
-                addCallee(node.resolveMethodBinding(), node.getStartPosition());
+                int nameOffset = node.getName() != null ? node.getName().getStartPosition() : node.getStartPosition();
+                addCallee(node.resolveMethodBinding(), nameOffset);
                 return true;
             }
 
             @Override
             public boolean visit(ClassInstanceCreation node) {
-                addCallee(node.resolveConstructorBinding(), node.getStartPosition());
+                int typeOffset = node.getType() != null ? node.getType().getStartPosition() : node.getStartPosition();
+                addCallee(node.resolveConstructorBinding(), typeOffset);
                 return true;
             }
 
             private void addCallee(IMethodBinding binding, int callOffset) {
-                if (binding == null) {
+                if (binding == null || callOffset < targetStart || callOffset >= targetEnd) {
                     return;
                 }
                 IJavaElement resolved = binding.getJavaElement();
@@ -430,8 +441,11 @@ final class JavaNavigationService {
                 node.put("offset", callOffset);
                 node.put("snippet", lineSnippet(resource, line));
                 try {
-                    if (remainingDepth > 1 && visited.add(callee.getHandleIdentifier())) {
-                        node.put("children", collectCallees(callee, remainingDepth - 1, visited));
+                    String calleeHandle = callee.getHandleIdentifier();
+                    if (remainingDepth > 1 && !visited.contains(calleeHandle)) {
+                        Set<String> nextVisited = new HashSet<>(visited);
+                        nextVisited.add(calleeHandle);
+                        node.put("children", collectCallees(callee, remainingDepth - 1, nextVisited));
                     } else {
                         node.put("children", List.of());
                     }
@@ -498,6 +512,18 @@ final class JavaNavigationService {
         if (element instanceof IMethod method) {
             IType declaring = method.getDeclaringType();
             info.put("declaringType", declaring != null ? declaring.getFullyQualifiedName() : null);
+        }
+        if (resource != null && element instanceof ISourceReference sourceRef) {
+            try {
+                ISourceRange range = sourceRef.getNameRange();
+                if (range == null || range.getOffset() < 0) {
+                    range = sourceRef.getSourceRange();
+                }
+                if (range != null && range.getOffset() >= 0) {
+                    info.put("offset", range.getOffset());
+                    info.put("line", lineAtOffset(resource, range.getOffset()));
+                }
+            } catch (JavaModelException ignored) {}
         }
         return info;
     }

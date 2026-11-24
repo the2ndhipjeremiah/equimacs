@@ -93,15 +93,15 @@
 
    <extension point="org.eclipse.ui.menus">
       <menuContribution locationURI="popup:org.eclipse.ui.popup.any?after=additions">
-         <command commandId="org.equimacs.eclipse.ui.addReviewComment"
-                  label="Add Review Comment"
-                  style="push">
+         <menu id="org.equimacs.eclipse.ui.editorMenu" label="Equimacs">
             <visibleWhen checkEnabled="false">
                <with variable="activeEditor">
                   <instanceof value="org.eclipse.ui.texteditor.ITextEditor"/>
                </with>
             </visibleWhen>
-         </command>
+            <dynamic id="org.equimacs.eclipse.ui.editorDynamicItems"
+                     class="org.equimacs.eclipse.ui.review.EditorContextMenuContribution"/>
+         </menu>
       </menuContribution>
    </extension>
 </plugin>

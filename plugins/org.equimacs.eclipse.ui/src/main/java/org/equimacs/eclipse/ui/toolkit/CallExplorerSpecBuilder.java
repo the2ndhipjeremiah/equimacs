@@ -134,8 +134,16 @@ public final class CallExplorerSpecBuilder {
         JsonObject targetObj = resolveTargetObject(callersPayload, calleesPayload);
         String targetName = optString(targetObj, "name", fallbackFileName(safeOptions.file(), "<target>"));
         String targetType = optString(targetObj, "declaringType", "");
-        String targetFile = firstNonBlank(optString(targetObj, "file", null), safeOptions.file());
-        int targetLine = optInt(targetObj, "line", -1);
+        String targetDeclFile = optString(targetObj, "file", null);
+        int targetDeclLine = optInt(targetObj, "line", -1);
+        int targetDeclOffset = optInt(targetObj, "offset", -1);
+        String targetFile = firstNonBlank(targetDeclFile, safeOptions.file());
+        int focusOffset = (targetDeclFile != null && !targetDeclFile.isBlank() && targetDeclOffset >= 0)
+            ? targetDeclOffset
+            : safeOptions.offset();
+        String focusFile = (targetDeclFile != null && !targetDeclFile.isBlank() && targetDeclOffset >= 0)
+            ? targetDeclFile
+            : safeOptions.file();
         String targetKey = methodKey(targetType, targetName, targetFile);
 
         int[] filteredCount = new int[] { 0 };
@@ -179,12 +187,12 @@ public final class CallExplorerSpecBuilder {
             + (hideJdk && filteredCount[0] > 0 ? " [" + filteredCount[0] + " JDK filtered]" : "");
 
         JsonArray toolbar = buildToolbar(
-            targetFile, safeOptions.offset(), direction, depth, hideJdk, viewMode, resolvedViewId, filteredCount[0]);
+            focusFile, focusOffset, direction, depth, hideJdk, viewMode, resolvedViewId, filteredCount[0]);
 
         JsonObject treeSpec = new JsonObject();
         treeSpec.addProperty("kind", "tree");
         treeSpec.addProperty("title", title);
-        treeSpec.add("columns", stringArray(List.of("Method", "Type", "Location", "Snippet")));
+        treeSpec.add("columns", stringArray(List.of("Method", "Type", "Call Site", "Snippet")));
         treeSpec.addProperty("expandAll", true);
         treeSpec.add("roots", roots);
 
@@ -197,8 +205,8 @@ public final class CallExplorerSpecBuilder {
             targetName,
             targetType,
             targetFile,
-            targetLine,
-            safeOptions.offset(),
+            targetDeclLine,
+            focusOffset,
             targetKey,
             direction,
             depth,
@@ -235,17 +243,23 @@ public final class CallExplorerSpecBuilder {
             int filteredCount) {
         JsonArray toolbar = new JsonArray();
         toolbar.add(toolkitButton(
-            "Callers", "Show incoming callers", file, offset, "callers", depth, hideJdk, viewMode, viewId));
+            "callers".equals(direction) ? "* Callers" : "Callers",
+            "Show incoming callers", file, offset, "callers", depth, hideJdk, viewMode, viewId));
         toolbar.add(toolkitButton(
-            "Callees", "Show outgoing callees", file, offset, "callees", depth, hideJdk, viewMode, viewId));
+            "callees".equals(direction) ? "* Callees" : "Callees",
+            "Show outgoing callees", file, offset, "callees", depth, hideJdk, viewMode, viewId));
         toolbar.add(toolkitButton(
-            "Both", "Show both callers and callees", file, offset, "both", depth, hideJdk, viewMode, viewId));
+            "both".equals(direction) ? "* Both" : "Both",
+            "Show both callers and callees", file, offset, "both", depth, hideJdk, viewMode, viewId));
         toolbar.add(toolkitButton(
-            "Depth 1", "Limit call hierarchy depth to 1", file, offset, direction, 1, hideJdk, viewMode, viewId));
+            depth == 1 ? "* Depth 1" : "Depth 1",
+            "Limit call hierarchy depth to 1", file, offset, direction, 1, hideJdk, viewMode, viewId));
         toolbar.add(toolkitButton(
-            "Depth 3", "Limit call hierarchy depth to 3", file, offset, direction, 3, hideJdk, viewMode, viewId));
+            depth == 3 ? "* Depth 3" : "Depth 3",
+            "Limit call hierarchy depth to 3", file, offset, direction, 3, hideJdk, viewMode, viewId));
         toolbar.add(toolkitButton(
-            "Depth 5", "Limit call hierarchy depth to 5", file, offset, direction, 5, hideJdk, viewMode, viewId));
+            depth == 5 ? "* Depth 5" : "Depth 5",
+            "Limit call hierarchy depth to 5", file, offset, direction, 5, hideJdk, viewMode, viewId));
 
         String jdkLabel = hideJdk ? "Show JDK" : "Hide JDK";
         String jdkTooltip = hideJdk
@@ -413,6 +427,7 @@ public final class CallExplorerSpecBuilder {
             "FOCUS",
             targetFile,
             targetLine,
+            targetFile,
             targetOffset,
             direction,
             depth,
@@ -507,10 +522,25 @@ public final class CallExplorerSpecBuilder {
             if (hideJdk && isJdkType(declaringType)) {
                 continue;
             }
-            String file = firstNonBlank(optString(rawNode, "file", null), optString(elementObj, "file", null));
-            int line = optInt(rawNode, "line", -1);
-            int offset = optInt(rawNode, "offset", -1);
-            String key = methodKey(declaringType, name, file);
+            String callFile = optString(rawNode, "file", null);
+            int callLine = optInt(rawNode, "line", -1);
+            int callOffset = optInt(rawNode, "offset", -1);
+
+            String declFile = optString(elementObj, "file", null);
+            int declLine = optInt(elementObj, "line", -1);
+            int declOffset = optInt(elementObj, "offset", -1);
+
+            boolean hasDecl = declFile != null && !declFile.isBlank() && declLine > 0;
+            String openFile = hasDecl ? declFile : firstNonBlank(declFile, callFile);
+            int openLine = hasDecl ? declLine : callLine;
+            String sublabelFile = hasDecl ? declFile : null;
+            int sublabelLine = hasDecl ? declLine : -1;
+
+            boolean hasDeclOffset = declFile != null && !declFile.isBlank() && declOffset >= 0;
+            String focusFile = hasDeclOffset ? declFile : callFile;
+            int focusOffset = hasDeclOffset ? declOffset : callOffset;
+
+            String key = methodKey(declaringType, name, firstNonBlank(declFile, callFile));
             boolean recursive = !key.isEmpty() && branchAncestors.contains(key);
 
             String nodeId;
@@ -530,13 +560,14 @@ public final class CallExplorerSpecBuilder {
                 graphNodes.add(buildGraphNode(
                     nodeId,
                     name,
-                    buildSublabel(declaringType, file, line),
+                    buildSublabel(declaringType, sublabelFile, sublabelLine),
                     group,
                     layer,
                     recursive ? "RECURSIVE" : defaultBadge,
-                    file,
-                    line,
-                    offset,
+                    openFile,
+                    openLine,
+                    focusFile,
+                    focusOffset,
                     direction,
                     maxDepth,
                     hideJdk,
@@ -587,9 +618,10 @@ public final class CallExplorerSpecBuilder {
             String group,
             int layer,
             String badge,
-            String file,
-            int line,
-            int offset,
+            String openFile,
+            int openLine,
+            String focusFile,
+            int focusOffset,
             String direction,
             int depth,
             boolean hideJdk,
@@ -601,11 +633,11 @@ public final class CallExplorerSpecBuilder {
         node.addProperty("group", group);
         node.addProperty("layer", layer);
         node.addProperty("badge", badge);
-        if (isValidFileLine(file, line)) {
-            node.add("onActivate", buildOpenFileAction(file, line));
+        if (isValidFileLine(openFile, openLine)) {
+            node.add("onActivate", buildOpenFileAction(openFile, openLine));
         }
-        if (file != null && !file.isBlank() && offset >= 0) {
-            node.add("onSecondary", buildCallExplorerAction(file, offset, direction, depth, hideJdk, "hybrid", viewId));
+        if (focusFile != null && !focusFile.isBlank() && focusOffset >= 0) {
+            node.add("onSecondary", buildCallExplorerAction(focusFile, focusOffset, direction, depth, hideJdk, "hybrid", viewId));
             node.addProperty("secondaryLabel", "Focus in Call Explorer");
         }
         return node;

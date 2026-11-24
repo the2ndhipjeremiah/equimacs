@@ -327,6 +327,46 @@ public class ReviewView extends ViewPart {
         }
     }
 
+    /**
+     * Opens/activates the Review view and selects {@code commentId}, unchecking "Hide resolved"
+     * when {@code includeResolved} is {@code true}.
+     */
+    public static void showAndSelect(String commentId, boolean includeResolved) {
+        if (!PlatformUI.isWorkbenchRunning()) {
+            return;
+        }
+        Display display = PlatformUI.getWorkbench().getDisplay();
+        if (display == null || display.isDisposed()) {
+            return;
+        }
+        Runnable task = () -> {
+            try {
+                org.eclipse.ui.IWorkbenchWindow window = PlatformUI.getWorkbench().getActiveWorkbenchWindow();
+                if (window == null) {
+                    return;
+                }
+                IWorkbenchPage page = window.getActivePage();
+                if (page == null) {
+                    return;
+                }
+                org.eclipse.ui.IViewPart part = page.showView(VIEW_ID);
+                if (part instanceof ReviewView view) {
+                    if (includeResolved && view.hideResolvedCheck != null && !view.hideResolvedCheck.isDisposed()) {
+                        view.hideResolvedCheck.setSelection(false);
+                    }
+                    view.reload(commentId);
+                }
+            } catch (Exception ignored) {
+                // Best-effort UI activation.
+            }
+        };
+        if (Display.getCurrent() != display) {
+            display.asyncExec(task);
+        } else {
+            task.run();
+        }
+    }
+
     private void reload(String preserveCommentId) {
         try {
             store.reanchorAll();
