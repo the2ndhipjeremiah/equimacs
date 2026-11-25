@@ -28,6 +28,7 @@ Build
 GetQuickFixes
 ApplyFix
 GetClasspath
+SetClasspath
 GetProjectDescription
 RefreshProject
 PrepareRenameSymbol

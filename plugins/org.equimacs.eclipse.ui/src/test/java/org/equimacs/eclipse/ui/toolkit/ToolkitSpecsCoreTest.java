@@ -93,11 +93,13 @@ final class ToolkitSpecsCoreTest {
         assertEquals("/proj/src/Main.java", openMain.file());
         assertEquals(10, openMain.line());
 
-        // Toolbar has toolkit-view controls (with active markers) and Inspect Symbol action.
-        assertEquals(9, tree.toolbar().size());
+        // Toolbar has toolkit-view controls (with active markers), Group/Pin controls, and Inspect Symbol action.
+        assertEquals(11, tree.toolbar().size());
         assertEquals("* Callers", tree.toolbar().get(0).label());
         assertEquals("* Depth 5", tree.toolbar().get(5).label());
-        ViewSpec.ActionItem inspectItem = tree.toolbar().get(8);
+        assertEquals("Group: Flat", tree.toolbar().get(8).label());
+        assertEquals("Pin", tree.toolbar().get(9).label());
+        ViewSpec.ActionItem inspectItem = tree.toolbar().get(10);
         assertEquals("Inspect Symbol", inspectItem.label());
         ViewAction.Inspect inspectAction = assertInstanceOf(ViewAction.Inspect.class, inspectItem.action());
         assertEquals("jdt-symbol", inspectAction.targetKind());
@@ -264,6 +266,53 @@ final class ToolkitSpecsCoreTest {
         // Also ensure GraphLayoutCore lays out the spec cleanly.
         GraphLayoutCore.GraphLayout laidOut = GraphLayoutCore.layout(graph);
         assertEquals(graph.nodes().size(), laidOut.nodes().size());
+    }
+
+    @Test
+    void callExplorerPhase3SupportsGroupingFanoutSummaryAndComparison() {
+        JsonObject callers = JsonParser.parseString("""
+            {
+              "target": { "name": "save", "kind": "method", "file": "/proj/src/Repo.java", "declaringType": "com.acme.repo.Repo", "line": 12 },
+              "direction": "callers",
+              "depth": 2,
+              "nodes": [
+                { "element": { "name": "createOrder", "declaringType": "com.acme.order.OrderService", "file": "/proj/src/OrderService.java" }, "file": "/proj/src/OrderService.java", "line": 20, "snippet": "repo.save();", "children": [] },
+                { "element": { "name": "updateOrder", "declaringType": "com.acme.order.OrderService", "file": "/proj/src/OrderService.java" }, "file": "/proj/src/OrderService.java", "line": 35, "snippet": "repo.save();", "children": [] },
+                { "element": { "name": "sync", "declaringType": "com.acme.sync.SyncJob", "file": "/proj/src/SyncJob.java" }, "file": "/proj/src/SyncJob.java", "line": 15, "snippet": "repo.save();", "children": [] },
+                { "element": { "name": "audit", "declaringType": "com.acme.audit.AuditJob", "file": "/proj/src/AuditJob.java" }, "file": "/proj/src/AuditJob.java", "line": 9, "snippet": "repo.save();", "children": [] }
+              ]
+            }
+            """).getAsJsonObject();
+
+        // Package grouping + maxFanout=3 summarizes the 4th caller.
+        CallExplorerSpecBuilder.CallExplorerOptions opts = new CallExplorerSpecBuilder.CallExplorerOptions(
+            "/proj/src/Repo.java", 100, "callers", 2, true, "hybrid", "ce-p3", "package", 3);
+        String json = CallExplorerSpecBuilder.buildSpecJson(opts, callers, null);
+        ViewSpec.SplitSpec split = assertInstanceOf(ViewSpec.SplitSpec.class, ViewSpecParser.parseEnvelope(json).spec());
+        ViewSpec.TreeSpec tree = assertInstanceOf(ViewSpec.TreeSpec.class, split.panes().get(0));
+        // 2 package groups (com.acme.order with 2 calls, com.acme.sync with 1 call) + 1 SUMMARY node
+        assertEquals(3, tree.roots().size());
+        assertEquals("PACKAGE", tree.roots().get(0).badge());
+        assertEquals("com.acme.order (2)", tree.roots().get(0).label());
+        assertEquals(2, tree.roots().get(0).children().size());
+        assertEquals("SUMMARY", tree.roots().get(2).badge());
+        assertEquals("1 more callers hidden", tree.roots().get(2).label());
+
+        ViewSpec.GraphSpec graph = assertInstanceOf(ViewSpec.GraphSpec.class, split.panes().get(1));
+        assertTrue(graph.nodes().stream().anyMatch(n -> "SUMMARY".equals(n.badge()) && n.label().contains("+1 more callers")));
+
+        // Side-by-side comparison produces a 50/50 horizontal split with both roots.
+        CallExplorerSpecBuilder.CallExplorerOptions leftOpts = new CallExplorerSpecBuilder.CallExplorerOptions(
+            "/proj/src/Repo.java", 100, "callers", 2, true, "tree", "ce-cmp", "type", 0);
+        CallExplorerSpecBuilder.CallExplorerOptions rightOpts = new CallExplorerSpecBuilder.CallExplorerOptions(
+            "/proj/src/Other.java", 50, "callers", 2, true, "tree", "ce-cmp", "none", 0);
+        String cmpJson = CallExplorerSpecBuilder.buildComparisonSpecJson(leftOpts, callers, null, rightOpts, callers, null);
+        ViewSpec.SplitSpec cmpSplit = assertInstanceOf(ViewSpec.SplitSpec.class, ViewSpecParser.parseEnvelope(cmpJson).spec());
+        assertEquals("horizontal", cmpSplit.orientation());
+        assertEquals(List.of(50, 50), cmpSplit.weights());
+        assertEquals(2, cmpSplit.panes().size());
+        ViewSpec.TreeSpec leftTree = assertInstanceOf(ViewSpec.TreeSpec.class, cmpSplit.panes().get(0));
+        assertEquals("TYPE", leftTree.roots().get(0).badge());
     }
 
     @Test

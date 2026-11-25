@@ -92,6 +92,19 @@ public class ReviewStoreCore {
         throw new IllegalArgumentException("Comment not found: " + commentId);
     }
 
+    public synchronized ReviewComment remove(String commentId) throws IOException {
+        List<ReviewComment> comments = load();
+        for (int i = 0; i < comments.size(); i++) {
+            ReviewComment c = comments.get(i);
+            if (c.id().equals(commentId)) {
+                comments.remove(i);
+                save(comments);
+                return c;
+            }
+        }
+        throw new IllegalArgumentException("Comment not found: " + commentId);
+    }
+
     public synchronized List<ReviewComment> list(String file) throws IOException {
         List<ReviewComment> comments = load();
         if (file == null || file.isBlank()) {

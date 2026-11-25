@@ -93,6 +93,7 @@ import org.eclipse.text.edits.TextEdit;
 
 public class JavaDebugController {
     private static final String PLUGIN_ID = "org.equimacs.debug";
+    private static final long PREPARED_REFACTORING_TTL_MS = 10L * 60L * 1000L;
     private static final String ATTR_LOGPOINT = "org.equimacs.debug.logpoint";
     private static final String ATTR_LOG_MESSAGE = "org.equimacs.debug.logMessage";
     private static final String ATTR_LOG_CAPTURE_VARS = "org.equimacs.debug.logCaptureVars";
@@ -810,6 +811,7 @@ public class JavaDebugController {
     // --- Refactoring ---
 
     public Map<String, Object> prepareRenameSymbol(String filePath, int offset, String newName) throws CoreException {
+        pruneExpiredRefactorings();
         IResource resource = requireResource(filePath, "Resource not found: " + filePath);
         if (!(resource instanceof IFile file)) {
             throw error("Refactoring target is not a file: " + filePath);
@@ -875,6 +877,7 @@ public class JavaDebugController {
     }
 
     public Map<String, Object> getPreparedRefactoring(String refactoringId) throws CoreException {
+        pruneExpiredRefactorings();
         PreparedRefactoring refactoring = preparedRefactorings.get(refactoringId);
         if (refactoring == null) {
             throw error("Prepared refactoring not found: " + refactoringId);
@@ -883,6 +886,7 @@ public class JavaDebugController {
     }
 
     public Map<String, Object> abortPreparedRefactoring(String refactoringId) throws CoreException {
+        pruneExpiredRefactorings();
         PreparedRefactoring refactoring = preparedRefactorings.remove(refactoringId);
         if (refactoring == null) {
             throw error("Prepared refactoring not found: " + refactoringId);
@@ -897,6 +901,7 @@ public class JavaDebugController {
     }
 
     public Map<String, Object> applyPreparedRefactoring(String refactoringId) throws CoreException {
+        pruneExpiredRefactorings();
         PreparedRefactoring refactoring = preparedRefactorings.remove(refactoringId);
         if (refactoring == null) {
             throw error("Prepared refactoring not found: " + refactoringId);
@@ -909,6 +914,10 @@ public class JavaDebugController {
             RefactoringStatus validation = perform.getValidationStatus();
             if (validation != null && validation.hasError()) {
                 throw error("Prepared refactoring is no longer valid: " + validation.toString());
+            }
+            if (!perform.changeExecuted()) {
+                throw error("Prepared refactoring could not be executed"
+                    + (validation != null ? ": " + validation.toString() : ""));
             }
 
             Map<String, Object> summary = castMap(refactoring.preview().get("summary"));
@@ -924,12 +933,28 @@ public class JavaDebugController {
         }
     }
 
+    private void pruneExpiredRefactorings() {
+        long cutoff = System.currentTimeMillis() - PREPARED_REFACTORING_TTL_MS;
+        for (Map.Entry<String, PreparedRefactoring> entry : preparedRefactorings.entrySet()) {
+            PreparedRefactoring candidate = entry.getValue();
+            if (candidate.createdAtMillis() < cutoff
+                    && preparedRefactorings.remove(entry.getKey(), candidate)) {
+                try {
+                    candidate.change().dispose();
+                } catch (Exception ignored) {
+                    // Best-effort cleanup of expired refactoring change.
+                }
+            }
+        }
+    }
+
     private String renameRefactoringId(IJavaElement element) throws CoreException {
         return switch (element.getElementType()) {
             case IJavaElement.LOCAL_VARIABLE -> IJavaRefactorings.RENAME_LOCAL_VARIABLE;
             case IJavaElement.FIELD -> IJavaRefactorings.RENAME_FIELD;
             case IJavaElement.METHOD -> IJavaRefactorings.RENAME_METHOD;
             case IJavaElement.TYPE -> IJavaRefactorings.RENAME_TYPE;
+            case IJavaElement.PACKAGE_FRAGMENT -> IJavaRefactorings.RENAME_PACKAGE;
             default -> throw error("Unsupported rename target: " + element.getElementName());
         };
     }
@@ -1073,6 +1098,105 @@ public class JavaDebugController {
         result.put("outputLocation", javaProject.getOutputLocation().toString());
         result.put("entries", entries);
         return result;
+    }
+
+    public Map<String, Object> setClasspath(
+        String projectName,
+        String action,
+        String kind,
+        String entryPath,
+        String sourceAttachment
+    ) throws CoreException {
+        if (action == null || action.isBlank()) {
+            throw error("SetClasspath requires action 'add' or 'remove'");
+        }
+        if (entryPath == null || entryPath.isBlank()) {
+            throw error("SetClasspath requires a non-blank path");
+        }
+        String normalizedAction = action.trim().toLowerCase();
+        if (!"add".equals(normalizedAction) && !"remove".equals(normalizedAction)) {
+            throw error("Unsupported SetClasspath action (expected add or remove): " + action);
+        }
+
+        IJavaProject javaProject = requireJavaProject(projectName);
+        IClasspathEntry[] existing = javaProject.getRawClasspath();
+        Path targetPath = new Path(entryPath.trim());
+        boolean changed;
+
+        if ("add".equals(normalizedAction)) {
+            int entryKind = parseClasspathKind(kind, true);
+            IClasspathEntry newEntry = createClasspathEntry(entryKind, targetPath, sourceAttachment);
+            boolean alreadyPresent = false;
+            for (IClasspathEntry e : existing) {
+                if (e.getEntryKind() == entryKind && e.getPath().equals(targetPath)) {
+                    alreadyPresent = true;
+                    break;
+                }
+            }
+            if (alreadyPresent) {
+                changed = false;
+            } else {
+                List<IClasspathEntry> updated = new ArrayList<>(existing.length + 1);
+                for (IClasspathEntry e : existing) {
+                    updated.add(e);
+                }
+                updated.add(newEntry);
+                javaProject.setRawClasspath(updated.toArray(IClasspathEntry[]::new), NULL_MONITOR);
+                changed = true;
+            }
+        } else {
+            int filterKind = (kind != null && !kind.isBlank()) ? parseClasspathKind(kind, false) : -1;
+            List<IClasspathEntry> updated = new ArrayList<>(existing.length);
+            int removed = 0;
+            for (IClasspathEntry e : existing) {
+                boolean kindMatches = filterKind < 0 || e.getEntryKind() == filterKind;
+                if (kindMatches && e.getPath().equals(targetPath)) {
+                    removed++;
+                } else {
+                    updated.add(e);
+                }
+            }
+            changed = removed > 0;
+            if (changed) {
+                javaProject.setRawClasspath(updated.toArray(IClasspathEntry[]::new), NULL_MONITOR);
+            }
+        }
+
+        Map<String, Object> result = getClasspath(projectName);
+        result.put("action", normalizedAction);
+        result.put("changed", changed);
+        return result;
+    }
+
+    private int parseClasspathKind(String kind, boolean required) throws CoreException {
+        if (kind == null || kind.isBlank()) {
+            if (required) {
+                throw error("SetClasspath requires kind (source, library, project, container, variable)");
+            }
+            return -1;
+        }
+        return switch (kind.trim().toLowerCase()) {
+            case "source" -> IClasspathEntry.CPE_SOURCE;
+            case "library" -> IClasspathEntry.CPE_LIBRARY;
+            case "project" -> IClasspathEntry.CPE_PROJECT;
+            case "container" -> IClasspathEntry.CPE_CONTAINER;
+            case "variable" -> IClasspathEntry.CPE_VARIABLE;
+            default -> throw error("Unsupported classpath entry kind: " + kind);
+        };
+    }
+
+    private static IClasspathEntry createClasspathEntry(int kind, Path path, String sourceAttachment) {
+        Path srcPath = (sourceAttachment != null && !sourceAttachment.isBlank())
+            ? new Path(sourceAttachment.trim())
+            : null;
+        return switch (kind) {
+            case IClasspathEntry.CPE_SOURCE -> JavaCore.newSourceEntry(path);
+            case IClasspathEntry.CPE_LIBRARY -> JavaCore.newLibraryEntry(path, srcPath, null);
+            case IClasspathEntry.CPE_PROJECT -> JavaCore.newProjectEntry(path);
+            case IClasspathEntry.CPE_CONTAINER -> JavaCore.newContainerEntry(path);
+            case IClasspathEntry.CPE_VARIABLE -> JavaCore.newVariableEntry(path, srcPath, null);
+            default -> throw new IllegalArgumentException("Unsupported classpath kind: " + kind);
+        };
     }
 
     public String refreshProject(String projectName) throws CoreException {

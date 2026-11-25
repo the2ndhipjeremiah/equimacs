@@ -40,6 +40,18 @@ public final class BuiltInInspectProviders {
         return ALL;
     }
 
+    static boolean isSyntheticNoReturnPlaceholder(String name) {
+        return name != null && "no method return value".equalsIgnoreCase(name.trim());
+    }
+
+    static boolean isInspectableVariableName(String name) {
+        if (name == null || name.isBlank()) {
+            return false;
+        }
+        String trimmed = name.trim();
+        return "this".equals(trimmed) || LogpointTemplate.isSimpleIdentifier(trimmed);
+    }
+
     // --- 1. Frame Inspector ---
 
     private static final class FrameInspectorProvider implements IMoldableViewProvider {
@@ -80,9 +92,12 @@ public final class BuiltInInspectProviders {
             for (int i = 0; i < variables.size(); i++) {
                 Map<String, Object> varMap = variables.get(i);
                 String name = asString(varMap.get("name"));
+                if (isSyntheticNoReturnPlaceholder(name)) {
+                    continue;
+                }
                 String type = asString(varMap.get("type"));
                 String value = asString(varMap.get("value"));
-                JsonObject inspectAction = (frameId != null && !name.isBlank())
+                JsonObject inspectAction = (frameId != null && isInspectableVariableName(name))
                     ? inspectValueAction(frameId, name)
                     : null;
                 varRows.add(tableRow("var-" + i + "-" + name, List.of(name, type, value), inspectAction));

@@ -13,6 +13,7 @@ AddReviewComment
 ListReviewComments
 ReplyToComment
 ResolveComment
+RemoveReviewComment
 ReviewDiagnostics
 EclipseWorkbench
 EclipseEditorDiagnostics

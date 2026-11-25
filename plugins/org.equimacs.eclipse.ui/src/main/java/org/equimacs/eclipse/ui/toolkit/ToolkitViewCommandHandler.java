@@ -74,6 +74,8 @@ public final class ToolkitViewCommandHandler implements IBridgeCommandHandler {
         int depth = CallExplorerSpecBuilder.clampDepth(req.depth());
         boolean hideJdk = req.hideJdk() == null || req.hideJdk();
         String viewMode = CallExplorerSpecBuilder.normalizeViewMode(req.viewMode());
+        String groupBy = CallExplorerSpecBuilder.normalizeGroupBy(req.groupBy());
+        int maxFanout = CallExplorerSpecBuilder.normalizeMaxFanout(req.maxFanout());
         String viewId = (req.viewId() != null && !req.viewId().isBlank())
             ? req.viewId().trim()
             : CallExplorerSpecBuilder.defaultViewId(req.file(), req.offset());
@@ -86,8 +88,24 @@ public final class ToolkitViewCommandHandler implements IBridgeCommandHandler {
             : null;
 
         CallExplorerSpecBuilder.CallExplorerOptions options = new CallExplorerSpecBuilder.CallExplorerOptions(
-            req.file(), req.offset(), direction, depth, hideJdk, viewMode, viewId);
-        String specJson = CallExplorerSpecBuilder.buildSpecJson(options, callersPayload, calleesPayload);
+            req.file(), req.offset(), direction, depth, hideJdk, viewMode, viewId, groupBy, maxFanout);
+
+        String specJson;
+        if (req.compareFile() != null && !req.compareFile().isBlank() && req.compareOffset() >= 0) {
+            JsonObject cmpCallers = ("callers".equals(direction) || "both".equals(direction))
+                ? dispatchJsonObject(service, new Request.CallHierarchy(req.compareFile(), req.compareOffset(), "callers", depth))
+                : null;
+            JsonObject cmpCallees = ("callees".equals(direction) || "both".equals(direction))
+                ? dispatchJsonObject(service, new Request.CallHierarchy(req.compareFile(), req.compareOffset(), "callees", depth))
+                : null;
+            CallExplorerSpecBuilder.CallExplorerOptions compareOptions = new CallExplorerSpecBuilder.CallExplorerOptions(
+                req.compareFile(), req.compareOffset(), direction, depth, hideJdk, viewMode, viewId, groupBy, maxFanout);
+            specJson = CallExplorerSpecBuilder.buildComparisonSpecJson(
+                options, callersPayload, calleesPayload,
+                compareOptions, cmpCallers, cmpCallees);
+        } else {
+            specJson = CallExplorerSpecBuilder.buildSpecJson(options, callersPayload, calleesPayload);
+        }
         return dispatchViewOpen(service, viewId, specJson);
     }
 

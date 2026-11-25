@@ -67,6 +67,16 @@ class CliParserTest {
     @Test
     void parsesProjectConfigCommands() {
         assertEquals(new Request.GetClasspath("myproject"), parse("classpath", "myproject"));
+        assertEquals(
+            new Request.SetClasspath("myproject", "add", "library", "/myproject/lib/foo.jar", "/myproject/lib/foo-src.jar"),
+            parse("set-classpath", "myproject", "add", "library", "/myproject/lib/foo.jar", "--source-attachment", "/myproject/lib/foo-src.jar"));
+        assertEquals(
+            new Request.SetClasspath("myproject", "remove", null, "/myproject/lib/foo.jar", null),
+            parse("set-classpath", "myproject", "remove", "/myproject/lib/foo.jar"));
+        assertEquals(
+            new Request.SetClasspath("myproject", "remove", "source", "/myproject/test-src", null),
+            parse("set-classpath", "myproject", "remove", "source", "/myproject/test-src"));
+        assertThrows(CliParseException.class, () -> parse("set-classpath", "myproject", "add", "bogus", "/x"));
         assertEquals(new Request.GetProjectDescription("myproject"), parse("describe", "myproject"));
         assertEquals(new Request.RefreshProject("myproject"), parse("refresh", "myproject"));
     }
@@ -314,6 +324,8 @@ class CliParserTest {
             new Request.ListReviewComments("/proj/src/App.java", "changed-files"),
             parse("review-list", "--filter", "changed-files", "/proj/src/App.java"));
         assertThrows(CliParseException.class, () -> parse("review-list", "--filter", "bogus"));
+        assertEquals(new Request.RemoveReviewComment("cmt-123"), parse("review-remove", "cmt-123"));
+        assertThrows(CliParseException.class, () -> parse("review-remove"));
     }
 
     @Test
@@ -423,6 +435,12 @@ class CliParserTest {
         assertEquals(
             new Request.OpenCallExplorer("/proj/src/Service.java", 88, "both", 3, Boolean.FALSE, "hybrid", null),
             parse("call-explorer", "/proj/src/Service.java:88", "-d", "both", "--hide-jdk", "false", "-m", "hybrid"));
+        assertEquals(
+            new Request.OpenCallExplorer(
+                "/proj/src/Service.java", 88, "callers", 3, Boolean.TRUE, "hybrid", null,
+                "package", 10, "/proj/src/Other.java", 42),
+            parse("call-explorer", "/proj/src/Service.java:88", "--group-by", "package", "--max-fanout", "10", "--compare", "/proj/src/Other.java:42"));
+        assertThrows(CliParseException.class, () -> parse("call-explorer", "/proj/src/Service.java:88", "--group-by", "bogus"));
         assertThrows(CliParseException.class, () -> parse("call-explorer", "C:\\proj\\Service.java"));
         assertThrows(CliParseException.class, () -> parse("call-explorer", "/proj/src/Service.java:88", "--direction", "up"));
         assertThrows(CliParseException.class, () -> parse("call-explorer", "/proj/src/Service.java:88", "--depth", "0"));

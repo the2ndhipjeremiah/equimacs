@@ -5,8 +5,10 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -21,6 +23,7 @@ public final class CallExplorerSpecBuilder {
     public static final int DEFAULT_DEPTH = 3;
     public static final int MIN_DEPTH = 1;
     public static final int MAX_DEPTH = 5;
+    public static final int MAX_FANOUT_LIMIT = 200;
     private static final int MAX_VIEW_ID_LENGTH = 128;
     private static final int MAX_GRAPH_NODES = 100;
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
@@ -35,7 +38,20 @@ public final class CallExplorerSpecBuilder {
             int depth,
             boolean hideJdk,
             String viewMode,
-            String viewId) {}
+            String viewId,
+            String groupBy,
+            int maxFanout) {
+        public CallExplorerOptions(
+                String file,
+                int offset,
+                String direction,
+                int depth,
+                boolean hideJdk,
+                String viewMode,
+                String viewId) {
+            this(file, offset, direction, depth, hideJdk, viewMode, viewId, "none", 0);
+        }
+    }
 
     private CallExplorerSpecBuilder() {}
 
@@ -80,6 +96,31 @@ public final class CallExplorerSpecBuilder {
     }
 
     /**
+     * Normalizes grouping mode to {@code "none"}, {@code "type"}, or {@code "package"} (default {@code "none"}).
+     */
+    public static String normalizeGroupBy(String groupBy) {
+        if (groupBy == null || groupBy.isBlank()) {
+            return "none";
+        }
+        String normalized = groupBy.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "none", "type", "package" -> normalized;
+            default -> throw new IllegalArgumentException(
+                "Unsupported call explorer groupBy: " + groupBy + " (expected none, type, or package)");
+        };
+    }
+
+    /**
+     * Normalizes max fan-out per node ({@code <= 0} means unlimited, otherwise clamped to {@code 1..200}).
+     */
+    public static int normalizeMaxFanout(int maxFanout) {
+        if (maxFanout <= 0) {
+            return 0;
+        }
+        return Math.min(maxFanout, MAX_FANOUT_LIMIT);
+    }
+
+    /**
      * Computes a deterministic, sanitized view ID matching {@code ^[A-Za-z0-9._-]+$}.
      */
     public static String defaultViewId(String file, int offset) {
@@ -121,14 +162,57 @@ public final class CallExplorerSpecBuilder {
             CallExplorerOptions options,
             JsonObject callersPayload,
             JsonObject calleesPayload) {
+        return GSON.toJson(buildSpecObject(options, callersPayload, calleesPayload, true));
+    }
+
+    /**
+     * Builds a side-by-side horizontal {@code split} ViewSpec comparing two pinned Call Explorer roots.
+     */
+    public static String buildComparisonSpecJson(
+            CallExplorerOptions leftOptions,
+            JsonObject leftCallers,
+            JsonObject leftCallees,
+            CallExplorerOptions rightOptions,
+            JsonObject rightCallers,
+            JsonObject rightCallees) {
+        JsonObject leftSpec = buildSpecObject(leftOptions, leftCallers, leftCallees, false);
+        JsonObject rightSpec = buildSpecObject(rightOptions, rightCallers, rightCallees, false);
+
+        String leftName = optString(resolveTargetObject(leftCallers, leftCallees), "name",
+            fallbackFileName(leftOptions != null ? leftOptions.file() : null, "Left"));
+        String rightName = optString(resolveTargetObject(rightCallers, rightCallees), "name",
+            fallbackFileName(rightOptions != null ? rightOptions.file() : null, "Right"));
+
+        JsonObject splitSpec = new JsonObject();
+        splitSpec.addProperty("kind", "split");
+        splitSpec.addProperty("title", "Call Compare: " + leftName + " vs " + rightName);
+        splitSpec.addProperty("orientation", "horizontal");
+        JsonArray weights = new JsonArray();
+        weights.add(50);
+        weights.add(50);
+        splitSpec.add("weights", weights);
+        JsonArray panes = new JsonArray();
+        panes.add(leftSpec);
+        panes.add(rightSpec);
+        splitSpec.add("panes", panes);
+        return GSON.toJson(splitSpec);
+    }
+
+    private static JsonObject buildSpecObject(
+            CallExplorerOptions options,
+            JsonObject callersPayload,
+            JsonObject calleesPayload,
+            boolean includeToolbar) {
         CallExplorerOptions safeOptions = options != null
             ? options
-            : new CallExplorerOptions("", 0, "both", DEFAULT_DEPTH, false, "hybrid", null);
+            : new CallExplorerOptions("", 0, "both", DEFAULT_DEPTH, false, "hybrid", null, "none", 0);
 
         String direction = normalizeDirection(safeOptions.direction());
         int depth = clampDepth(safeOptions.depth());
         boolean hideJdk = safeOptions.hideJdk();
         String viewMode = normalizeViewMode(safeOptions.viewMode());
+        String groupBy = normalizeGroupBy(safeOptions.groupBy());
+        int maxFanout = normalizeMaxFanout(safeOptions.maxFanout());
         String resolvedViewId = resolveViewId(safeOptions);
 
         JsonObject targetObj = resolveTargetObject(callersPayload, calleesPayload);
@@ -154,14 +238,19 @@ public final class CallExplorerSpecBuilder {
             initialAncestors.add(targetKey);
         }
 
+        TreeBuildContext treeCtx = new TreeBuildContext(
+            focusFile, focusOffset, direction, depth, hideJdk, viewMode, resolvedViewId, groupBy, maxFanout);
+
         JsonArray callerTreeNodes = ("callers".equals(direction) || "both".equals(direction))
             ? convertTreeNodes(
-                extractNodesArray(callersPayload), initialAncestors, hideJdk, "caller", filteredCount, treeNodeSeq)
+                extractNodesArray(callersPayload), initialAncestors, "caller", "callers",
+                treeCtx, filteredCount, treeNodeSeq)
             : new JsonArray();
 
         JsonArray calleeTreeNodes = ("callees".equals(direction) || "both".equals(direction))
             ? convertTreeNodes(
-                extractNodesArray(calleesPayload), initialAncestors, hideJdk, "callee", filteredCount, treeNodeSeq)
+                extractNodesArray(calleesPayload), initialAncestors, "callee", "callees",
+                treeCtx, filteredCount, treeNodeSeq)
             : new JsonArray();
 
         JsonArray roots;
@@ -183,11 +272,17 @@ public final class CallExplorerSpecBuilder {
             roots = calleeTreeNodes;
         }
 
-        String title = "Call Explorer: " + targetName + " (" + direction + ", d=" + depth + ")"
+        String title = "Call Explorer: " + targetName + " (" + direction + ", d=" + depth
+            + (!"none".equals(groupBy) ? ", group=" + groupBy : "")
+            + (maxFanout > 0 ? ", fanout<=" + maxFanout : "")
+            + ")"
             + (hideJdk && filteredCount[0] > 0 ? " [" + filteredCount[0] + " JDK filtered]" : "");
 
-        JsonArray toolbar = buildToolbar(
-            focusFile, focusOffset, direction, depth, hideJdk, viewMode, resolvedViewId, filteredCount[0]);
+        JsonArray toolbar = includeToolbar
+            ? buildToolbar(
+                focusFile, focusOffset, direction, depth, hideJdk, viewMode, resolvedViewId,
+                groupBy, maxFanout, filteredCount[0])
+            : null;
 
         JsonObject treeSpec = new JsonObject();
         treeSpec.addProperty("kind", "tree");
@@ -197,8 +292,10 @@ public final class CallExplorerSpecBuilder {
         treeSpec.add("roots", roots);
 
         if ("tree".equals(viewMode)) {
-            treeSpec.add("toolbar", toolbar);
-            return GSON.toJson(treeSpec);
+            if (toolbar != null) {
+                treeSpec.add("toolbar", toolbar);
+            }
+            return treeSpec;
         }
 
         JsonObject graphSpec = buildFocusGraphSpec(
@@ -211,6 +308,8 @@ public final class CallExplorerSpecBuilder {
             direction,
             depth,
             hideJdk,
+            groupBy,
+            maxFanout,
             resolvedViewId,
             callersPayload,
             calleesPayload);
@@ -223,14 +322,27 @@ public final class CallExplorerSpecBuilder {
         weights.add(55);
         weights.add(45);
         splitSpec.add("weights", weights);
-        splitSpec.add("toolbar", toolbar);
+        if (toolbar != null) {
+            splitSpec.add("toolbar", toolbar);
+        }
         JsonArray panes = new JsonArray();
         panes.add(treeSpec);
         panes.add(graphSpec);
         splitSpec.add("panes", panes);
 
-        return GSON.toJson(splitSpec);
+        return splitSpec;
     }
+
+    private record TreeBuildContext(
+            String focusFile,
+            int focusOffset,
+            String direction,
+            int depth,
+            boolean hideJdk,
+            String viewMode,
+            String viewId,
+            String groupBy,
+            int maxFanout) {}
 
     private static JsonArray buildToolbar(
             String file,
@@ -240,39 +352,62 @@ public final class CallExplorerSpecBuilder {
             boolean hideJdk,
             String viewMode,
             String viewId,
+            String groupBy,
+            int maxFanout,
             int filteredCount) {
         JsonArray toolbar = new JsonArray();
         toolbar.add(toolkitButton(
             "callers".equals(direction) ? "* Callers" : "Callers",
-            "Show incoming callers", file, offset, "callers", depth, hideJdk, viewMode, viewId));
+            "Show incoming callers", file, offset, "callers", depth, hideJdk, viewMode, viewId, groupBy, maxFanout));
         toolbar.add(toolkitButton(
             "callees".equals(direction) ? "* Callees" : "Callees",
-            "Show outgoing callees", file, offset, "callees", depth, hideJdk, viewMode, viewId));
+            "Show outgoing callees", file, offset, "callees", depth, hideJdk, viewMode, viewId, groupBy, maxFanout));
         toolbar.add(toolkitButton(
             "both".equals(direction) ? "* Both" : "Both",
-            "Show both callers and callees", file, offset, "both", depth, hideJdk, viewMode, viewId));
+            "Show both callers and callees", file, offset, "both", depth, hideJdk, viewMode, viewId, groupBy, maxFanout));
         toolbar.add(toolkitButton(
             depth == 1 ? "* Depth 1" : "Depth 1",
-            "Limit call hierarchy depth to 1", file, offset, direction, 1, hideJdk, viewMode, viewId));
+            "Limit call hierarchy depth to 1", file, offset, direction, 1, hideJdk, viewMode, viewId, groupBy, maxFanout));
         toolbar.add(toolkitButton(
             depth == 3 ? "* Depth 3" : "Depth 3",
-            "Limit call hierarchy depth to 3", file, offset, direction, 3, hideJdk, viewMode, viewId));
+            "Limit call hierarchy depth to 3", file, offset, direction, 3, hideJdk, viewMode, viewId, groupBy, maxFanout));
         toolbar.add(toolkitButton(
             depth == 5 ? "* Depth 5" : "Depth 5",
-            "Limit call hierarchy depth to 5", file, offset, direction, 5, hideJdk, viewMode, viewId));
+            "Limit call hierarchy depth to 5", file, offset, direction, 5, hideJdk, viewMode, viewId, groupBy, maxFanout));
 
         String jdkLabel = hideJdk ? "Show JDK" : "Hide JDK";
         String jdkTooltip = hideJdk
             ? "Show JDK methods (currently hiding " + filteredCount + ")"
             : "Hide java.*/javax.*/sun.*/jdk.* methods";
         toolbar.add(toolkitButton(
-            jdkLabel, jdkTooltip, file, offset, direction, depth, !hideJdk, viewMode, viewId));
+            jdkLabel, jdkTooltip, file, offset, direction, depth, !hideJdk, viewMode, viewId, groupBy, maxFanout));
 
         String nextMode = "tree".equals(viewMode) ? "hybrid" : "tree";
         String modeLabel = "tree".equals(viewMode) ? "Hybrid" : "Tree";
         String modeTooltip = "Switch to " + nextMode + " view";
         toolbar.add(toolkitButton(
-            modeLabel, modeTooltip, file, offset, direction, depth, hideJdk, nextMode, viewId));
+            modeLabel, modeTooltip, file, offset, direction, depth, hideJdk, nextMode, viewId, groupBy, maxFanout));
+
+        String nextGroup = switch (groupBy) {
+            case "none" -> "type";
+            case "type" -> "package";
+            default -> "none";
+        };
+        String groupLabel = switch (groupBy) {
+            case "type" -> "Group: Type";
+            case "package" -> "Group: Package";
+            default -> "Group: Flat";
+        };
+        toolbar.add(toolkitButton(
+            groupLabel,
+            "Cycle grouping mode (next: " + nextGroup + ")",
+            file, offset, direction, depth, hideJdk, viewMode, viewId, nextGroup, maxFanout));
+
+        String pinnedViewId = pinViewId(viewId);
+        toolbar.add(toolkitButton(
+            "Pin",
+            "Open a pinned copy of this Call Explorer in a separate view",
+            file, offset, direction, depth, hideJdk, viewMode, pinnedViewId, groupBy, maxFanout));
 
         if (file != null && !file.isBlank() && offset >= 0) {
             JsonObject inspectBtn = new JsonObject();
@@ -289,6 +424,18 @@ public final class CallExplorerSpecBuilder {
         return toolbar;
     }
 
+    private static String pinViewId(String viewId) {
+        String base = (viewId == null || viewId.isBlank()) ? "call-explorer" : viewId.trim();
+        if (base.endsWith("-pin")) {
+            return base;
+        }
+        String pinned = base + "-pin";
+        if (pinned.length() > MAX_VIEW_ID_LENGTH) {
+            pinned = base.substring(0, MAX_VIEW_ID_LENGTH - 4) + "-pin";
+        }
+        return pinned;
+    }
+
     private static JsonObject toolkitButton(
             String label,
             String tooltip,
@@ -298,11 +445,14 @@ public final class CallExplorerSpecBuilder {
             int depth,
             boolean hideJdk,
             String viewMode,
-            String viewId) {
+            String viewId,
+            String groupBy,
+            int maxFanout) {
         JsonObject item = new JsonObject();
         item.addProperty("label", label);
         item.addProperty("tooltip", tooltip);
-        item.add("action", buildCallExplorerAction(file, offset, direction, depth, hideJdk, viewMode, viewId));
+        item.add("action", buildCallExplorerAction(
+            file, offset, direction, depth, hideJdk, viewMode, viewId, groupBy, maxFanout));
         return item;
     }
 
@@ -313,7 +463,9 @@ public final class CallExplorerSpecBuilder {
             int depth,
             boolean hideJdk,
             String viewMode,
-            String viewId) {
+            String viewId,
+            String groupBy,
+            int maxFanout) {
         JsonObject action = new JsonObject();
         action.addProperty("type", "toolkit-view");
         action.addProperty("tool", "call-explorer");
@@ -325,6 +477,12 @@ public final class CallExplorerSpecBuilder {
         params.addProperty("hideJdk", String.valueOf(hideJdk));
         params.addProperty("viewMode", viewMode);
         params.addProperty("viewId", viewId);
+        if (groupBy != null && !"none".equals(groupBy)) {
+            params.addProperty("groupBy", groupBy);
+        }
+        if (maxFanout > 0) {
+            params.addProperty("maxFanout", String.valueOf(maxFanout));
+        }
         action.add("params", params);
         return action;
     }
@@ -339,17 +497,22 @@ public final class CallExplorerSpecBuilder {
         return node;
     }
 
+    private record TreeNodeWithOwner(JsonObject node, String declaringType) {}
+
     private static JsonArray convertTreeNodes(
             JsonArray rawNodes,
             Set<String> branchAncestors,
-            boolean hideJdk,
             String idPrefix,
+            String roleWord,
+            TreeBuildContext ctx,
             int[] filteredCount,
             int[] nodeSeq) {
-        JsonArray out = new JsonArray();
         if (rawNodes == null) {
-            return out;
+            return new JsonArray();
         }
+        List<TreeNodeWithOwner> built = new ArrayList<>();
+        int hiddenByFanout = 0;
+
         for (int i = 0; i < rawNodes.size(); i++) {
             JsonElement el = rawNodes.get(i);
             if (el == null || !el.isJsonObject()) {
@@ -359,8 +522,12 @@ public final class CallExplorerSpecBuilder {
             JsonObject elementObj = optObject(rawNode, "element");
             String name = optString(elementObj, "name", "<unknown>");
             String declaringType = optString(elementObj, "declaringType", "");
-            if (hideJdk && isJdkType(declaringType)) {
+            if (ctx.hideJdk() && isJdkType(declaringType)) {
                 filteredCount[0]++;
+                continue;
+            }
+            if (ctx.maxFanout() > 0 && built.size() >= ctx.maxFanout()) {
+                hiddenByFanout++;
                 continue;
             }
             String file = firstNonBlank(optString(rawNode, "file", null), optString(elementObj, "file", null));
@@ -389,14 +556,86 @@ public final class CallExplorerSpecBuilder {
                     nextAncestors.add(key);
                 }
                 children = convertTreeNodes(
-                    optArray(rawNode, "children"), nextAncestors, hideJdk, idPrefix, filteredCount, nodeSeq);
+                    optArray(rawNode, "children"), nextAncestors, idPrefix, roleWord, ctx, filteredCount, nodeSeq);
             } else {
                 children = new JsonArray();
             }
             treeNode.add("children", children);
-            out.add(treeNode);
+            built.add(new TreeNodeWithOwner(treeNode, declaringType));
+        }
+
+        JsonArray out = "none".equals(ctx.groupBy())
+            ? flattenNodes(built)
+            : groupTreeNodes(built, ctx.groupBy(), idPrefix, nodeSeq);
+
+        if (hiddenByFanout > 0) {
+            JsonObject summaryNode = new JsonObject();
+            summaryNode.addProperty("id", idPrefix + "_more_" + (nodeSeq[0]++));
+            summaryNode.addProperty("label", hiddenByFanout + " more " + roleWord + " hidden");
+            summaryNode.add("values", stringArray(List.of("", "maxFanout=" + ctx.maxFanout(), "Click to show all")));
+            summaryNode.addProperty("badge", "SUMMARY");
+            summaryNode.add("onActivate", buildCallExplorerAction(
+                ctx.focusFile(), ctx.focusOffset(), ctx.direction(), ctx.depth(),
+                ctx.hideJdk(), ctx.viewMode(), ctx.viewId(), ctx.groupBy(), 0));
+            summaryNode.add("children", new JsonArray());
+            out.add(summaryNode);
         }
         return out;
+    }
+
+    private static JsonArray flattenNodes(List<TreeNodeWithOwner> nodes) {
+        JsonArray out = new JsonArray();
+        for (TreeNodeWithOwner item : nodes) {
+            out.add(item.node());
+        }
+        return out;
+    }
+
+    private static JsonArray groupTreeNodes(
+            List<TreeNodeWithOwner> nodes,
+            String groupBy,
+            String idPrefix,
+            int[] nodeSeq) {
+        Map<String, List<JsonObject>> buckets = new LinkedHashMap<>();
+        for (TreeNodeWithOwner item : nodes) {
+            String bucketKey = "package".equals(groupBy)
+                ? packageName(item.declaringType())
+                : (item.declaringType() == null || item.declaringType().isBlank() ? "(unknown)" : item.declaringType());
+            buckets.computeIfAbsent(bucketKey, k -> new ArrayList<>()).add(item.node());
+        }
+        JsonArray out = new JsonArray();
+        String badge = "package".equals(groupBy) ? "PACKAGE" : "TYPE";
+        for (Map.Entry<String, List<JsonObject>> entry : buckets.entrySet()) {
+            String key = entry.getKey();
+            List<JsonObject> members = entry.getValue();
+            String label = "package".equals(groupBy) ? key : simpleTypeName(key);
+            if (label.isBlank()) {
+                label = key;
+            }
+            JsonArray children = new JsonArray();
+            for (JsonObject m : members) {
+                children.add(m);
+            }
+            JsonObject groupNode = new JsonObject();
+            groupNode.addProperty("id", idPrefix + "_grp_" + (nodeSeq[0]++));
+            groupNode.addProperty("label", label + " (" + members.size() + ")");
+            groupNode.add("values", stringArray(List.of(
+                "package".equals(groupBy) ? "" : key,
+                members.size() + (members.size() == 1 ? " call" : " calls"),
+                "")));
+            groupNode.addProperty("badge", badge);
+            groupNode.add("children", children);
+            out.add(groupNode);
+        }
+        return out;
+    }
+
+    private static String packageName(String fqn) {
+        if (fqn == null || fqn.isBlank()) {
+            return "(default)";
+        }
+        int lastDot = fqn.lastIndexOf('.');
+        return lastDot > 0 ? fqn.substring(0, lastDot) : "(default)";
     }
 
     private static JsonObject buildFocusGraphSpec(
@@ -409,6 +648,8 @@ public final class CallExplorerSpecBuilder {
             String direction,
             int depth,
             boolean hideJdk,
+            String groupBy,
+            int maxFanout,
             String viewId,
             JsonObject callersPayload,
             JsonObject calleesPayload) {
@@ -432,6 +673,8 @@ public final class CallExplorerSpecBuilder {
             direction,
             depth,
             hideJdk,
+            groupBy,
+            maxFanout,
             viewId);
         graphNodes.add(focusNode);
 
@@ -450,6 +693,8 @@ public final class CallExplorerSpecBuilder {
                 hideJdk,
                 direction,
                 depth,
+                groupBy,
+                maxFanout,
                 viewId,
                 graphNodes,
                 graphEdges,
@@ -468,6 +713,8 @@ public final class CallExplorerSpecBuilder {
                 hideJdk,
                 direction,
                 depth,
+                groupBy,
+                maxFanout,
                 viewId,
                 graphNodes,
                 graphEdges,
@@ -494,6 +741,8 @@ public final class CallExplorerSpecBuilder {
             boolean hideJdk,
             String direction,
             int maxDepth,
+            String groupBy,
+            int maxFanout,
             String viewId,
             JsonArray graphNodes,
             JsonArray graphEdges,
@@ -506,6 +755,8 @@ public final class CallExplorerSpecBuilder {
         String group = isCallerSide ? "left" : "right";
         int layer = isCallerSide ? -hopDepth : hopDepth;
         String defaultBadge = isCallerSide ? "CALLER" : "CALLEE";
+        int emittedAtLevel = 0;
+        int hiddenByFanout = 0;
 
         for (int i = 0; i < rawNodes.size(); i++) {
             if (graphNodes.size() >= MAX_GRAPH_NODES) {
@@ -522,6 +773,11 @@ public final class CallExplorerSpecBuilder {
             if (hideJdk && isJdkType(declaringType)) {
                 continue;
             }
+            if (maxFanout > 0 && emittedAtLevel >= maxFanout) {
+                hiddenByFanout++;
+                continue;
+            }
+            emittedAtLevel++;
             String callFile = optString(rawNode, "file", null);
             int callLine = optInt(rawNode, "line", -1);
             int callOffset = optInt(rawNode, "offset", -1);
@@ -571,6 +827,8 @@ public final class CallExplorerSpecBuilder {
                     direction,
                     maxDepth,
                     hideJdk,
+                    groupBy,
+                    maxFanout,
                     viewId));
             }
 
@@ -601,12 +859,39 @@ public final class CallExplorerSpecBuilder {
                     hideJdk,
                     direction,
                     maxDepth,
+                    groupBy,
+                    maxFanout,
                     viewId,
                     graphNodes,
                     graphEdges,
                     seenNonRecursiveNodes,
                     seenEdges,
                     graphSeq);
+            }
+        }
+
+        if (hiddenByFanout > 0 && graphNodes.size() < MAX_GRAPH_NODES) {
+            String summaryId = "n_more_" + (graphSeq[0]++);
+            String roleWord = isCallerSide ? "callers" : "callees";
+            JsonObject summaryNode = new JsonObject();
+            summaryNode.addProperty("id", summaryId);
+            summaryNode.addProperty("label", "+" + hiddenByFanout + " more " + roleWord);
+            summaryNode.addProperty("sublabel", "maxFanout=" + maxFanout);
+            summaryNode.addProperty("group", group);
+            summaryNode.addProperty("layer", layer);
+            summaryNode.addProperty("badge", "SUMMARY");
+            graphNodes.add(summaryNode);
+
+            String fromId = isCallerSide ? summaryId : parentNodeId;
+            String toId = isCallerSide ? parentNodeId : summaryId;
+            String edgeKey = fromId + "->" + toId + "|dashed";
+            if (seenEdges.add(edgeKey)) {
+                JsonObject edge = new JsonObject();
+                edge.addProperty("from", fromId);
+                edge.addProperty("to", toId);
+                edge.addProperty("label", "");
+                edge.addProperty("style", "dashed");
+                graphEdges.add(edge);
             }
         }
     }
@@ -625,6 +910,8 @@ public final class CallExplorerSpecBuilder {
             String direction,
             int depth,
             boolean hideJdk,
+            String groupBy,
+            int maxFanout,
             String viewId) {
         JsonObject node = new JsonObject();
         node.addProperty("id", id);
@@ -637,7 +924,8 @@ public final class CallExplorerSpecBuilder {
             node.add("onActivate", buildOpenFileAction(openFile, openLine));
         }
         if (focusFile != null && !focusFile.isBlank() && focusOffset >= 0) {
-            node.add("onSecondary", buildCallExplorerAction(focusFile, focusOffset, direction, depth, hideJdk, "hybrid", viewId));
+            node.add("onSecondary", buildCallExplorerAction(
+                focusFile, focusOffset, direction, depth, hideJdk, "hybrid", viewId, groupBy, maxFanout));
             node.addProperty("secondaryLabel", "Focus in Call Explorer");
         }
         return node;

@@ -115,6 +115,17 @@ public class ProtocolSchema {
             "expression": { "type": "string", "description": "Java expression to evaluate" }
           }
         },
+        "set-classpath": {
+          "description": "Add or remove a raw JDT classpath entry on a Java project",
+          "record": "SetClasspath",
+          "params": {
+            "project": { "type": "string", "description": "Java project name" },
+            "action": { "type": "string", "enum": ["add", "remove"], "description": "Whether to add or remove the entry" },
+            "kind": { "type": "string", "optional": true, "enum": ["source", "library", "project", "container", "variable"], "description": "Entry kind (required for add; optional filter for remove)" },
+            "path": { "type": "string", "description": "Classpath entry path" },
+            "sourceAttachment": { "type": "string", "optional": true, "description": "Optional source attachment path for library/variable entries" }
+          }
+        },
         "refactor-prepare": {
           "description": "Prepare a Java refactoring preview without applying edits",
           "record": "PrepareRenameSymbol",
@@ -176,6 +187,13 @@ public class ProtocolSchema {
         "review-resolve": {
           "description": "Mark a review comment thread as resolved",
           "record": "ResolveComment",
+          "params": {
+            "commentId": { "type": "string" }
+          }
+        },
+        "review-remove": {
+          "description": "Permanently remove a review comment thread and its marker",
+          "record": "RemoveReviewComment",
           "params": {
             "commentId": { "type": "string" }
           }
@@ -415,7 +433,11 @@ public class ProtocolSchema {
             "depth": { "type": "integer", "optional": true, "default": 3, "description": "Traversal depth (>= 1)" },
             "hideJdk": { "type": "boolean", "optional": true, "default": true, "description": "Hide JDK/standard library methods" },
             "viewMode": { "type": "string", "optional": true, "enum": ["tree", "hybrid"], "default": "hybrid", "description": "Explorer presentation mode" },
-            "viewId": { "type": "string", "optional": true, "description": "Optional moddable view ID override" }
+            "viewId": { "type": "string", "optional": true, "description": "Optional moddable view ID override" },
+            "groupBy": { "type": "string", "optional": true, "enum": ["none", "type", "package"], "default": "none", "description": "Collapse/group sibling call nodes by type or package" },
+            "maxFanout": { "type": "integer", "optional": true, "default": 0, "description": "Maximum children per node before summarizing hidden calls (0 = unlimited)" },
+            "compareFile": { "type": "string", "optional": true, "description": "Optional second root file path for side-by-side pinned comparison" },
+            "compareOffset": { "type": "integer", "optional": true, "default": -1, "description": "0-based character offset for side-by-side comparison root" }
           }
         },
         "trace-view": {

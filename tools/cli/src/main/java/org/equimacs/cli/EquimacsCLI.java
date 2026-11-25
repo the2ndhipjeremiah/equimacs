@@ -135,6 +135,7 @@ public class EquimacsCLI {
                     if (args.size() < 2) throw new CliParseException("Usage: classpath <project>");
                     yield new Request.GetClasspath(args.get(1));
                 }
+                case "set-classpath" -> parseSetClasspath(cli, args);
                 case "describe" -> {
                     if (args.size() < 2) throw new CliParseException("Usage: describe <project>");
                     yield new Request.GetProjectDescription(args.get(1));
@@ -401,6 +402,10 @@ public class EquimacsCLI {
                     if (args.size() < 2) throw new CliParseException("Usage: review-resolve <commentId>");
                     yield new Request.ResolveComment(args.get(1));
                 }
+                case "review-remove" -> {
+                    if (args.size() < 2) throw new CliParseException("Usage: review-remove <commentId>");
+                    yield new Request.RemoveReviewComment(args.get(1));
+                }
                 case "review-diagnostics" -> new Request.ReviewDiagnostics(args.size() > 1 ? args.get(1) : null);
                 case "eclipse-workbench" -> new Request.EclipseWorkbench();
                 case "eclipse-editor-diagnostics" -> new Request.EclipseEditorDiagnostics();
@@ -477,6 +482,40 @@ public class EquimacsCLI {
         } catch (RuntimeException e) {
             throw new CliParseException("Parsing error: " + e.getMessage(), e);
         }
+    }
+
+    private static Request.SetClasspath parseSetClasspath(CliArgs cli, List<String> args) {
+        String usage = "Usage: set-classpath <project> add <source|library|project|container|variable> <path> [--source-attachment <path>] "
+            + "OR set-classpath <project> remove [<kind>] <path> [--kind <kind>]";
+        if (args.size() < 4) {
+            throw new CliParseException(usage);
+        }
+        String project = args.get(1);
+        String action = parseAllowedOption("action", args.get(2), "", List.of("add", "remove"));
+        String sourceAttachment = cli.getOption("source-attachment");
+        if ("add".equals(action)) {
+            if (args.size() < 5) {
+                throw new CliParseException(usage);
+            }
+            String kind = parseAllowedOption(
+                "kind", args.get(3), "", List.of("source", "library", "project", "container", "variable"));
+            String path = args.get(4);
+            return new Request.SetClasspath(project, action, kind, path, sourceAttachment);
+        }
+        String kind = cli.getOption("kind", "k");
+        String path;
+        if (args.size() >= 5) {
+            kind = parseAllowedOption(
+                "kind", args.get(3), "", List.of("source", "library", "project", "container", "variable"));
+            path = args.get(4);
+        } else {
+            if (kind != null) {
+                kind = parseAllowedOption(
+                    "--kind", kind, "", List.of("source", "library", "project", "container", "variable"));
+            }
+            path = args.get(3);
+        }
+        return new Request.SetClasspath(project, action, kind, path, null);
     }
 
     private static String resolveReviewFilter(CliArgs cli) {
@@ -658,7 +697,7 @@ public class EquimacsCLI {
     }
 
     private static Request.OpenCallExplorer parseCallExplorer(CliArgs cli, List<String> args) {
-        String usage = "Usage: call-explorer <file>:<offset> [--direction callers|callees|both] [--depth <n>] [--hide-jdk true|false | --show-jdk] [--mode tree|hybrid] [--view-id <id>]";
+        String usage = "Usage: call-explorer <file>:<offset> [--direction callers|callees|both] [--depth <n>] [--hide-jdk true|false | --show-jdk] [--mode tree|hybrid] [--group-by none|type|package] [--max-fanout <n>] [--compare <file>:<offset>] [--view-id <id>]";
         if (args.size() < 2) {
             throw new CliParseException(usage);
         }
@@ -670,8 +709,22 @@ public class EquimacsCLI {
         String viewMode = parseAllowedOption(
             "--mode", cli.getOption("mode", "m"), "hybrid", List.of("tree", "hybrid"));
         String viewId = cli.getOption("view-id");
+        String groupByOpt = cli.getOption("group-by");
+        String groupBy = groupByOpt != null
+            ? parseAllowedOption("--group-by", groupByOpt, "none", List.of("none", "type", "package"))
+            : null;
+        int maxFanout = parseIntAtLeast("--max-fanout", cli.getOption("max-fanout"), 0, 0);
+        String compareSpec = cli.getOption("compare");
+        String compareFile = null;
+        int compareOffset = -1;
+        if (compareSpec != null && !compareSpec.isBlank()) {
+            FileOffset cmp = parseFileOffset(compareSpec, usage);
+            compareFile = cmp.file();
+            compareOffset = cmp.offset();
+        }
         return new Request.OpenCallExplorer(
-            target.file(), target.offset(), direction, depth, hideJdk, viewMode, viewId);
+            target.file(), target.offset(), direction, depth, hideJdk, viewMode, viewId,
+            groupBy, maxFanout, compareFile, compareOffset);
     }
 
     private static Request.OpenTraceView parseTraceView(CliArgs cli) {

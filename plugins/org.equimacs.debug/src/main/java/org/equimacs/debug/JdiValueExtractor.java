@@ -62,8 +62,11 @@ final class JdiValueExtractor {
             IVariable[] frameVars = frame.getVariables();
             if (frameVars != null) {
                 for (IVariable variable : frameVars) {
-                    Map<String, Object> item = new LinkedHashMap<>();
                     String name = safeString(variable::getName, "<unknown>");
+                    if (BuiltInInspectProviders.isSyntheticNoReturnPlaceholder(name)) {
+                        continue;
+                    }
+                    Map<String, Object> item = new LinkedHashMap<>();
                     item.put("name", name);
                     try {
                         IValue val = variable.getValue();
@@ -516,7 +519,7 @@ final class JdiValueExtractor {
             sb.append(')');
         }
         if (sb.length() > 0) {
-            sb.append(" — ");
+            sb.append(" - ");
         }
         sb.append(varCount).append(varCount == 1 ? " variable" : " variables");
         return sb.toString();

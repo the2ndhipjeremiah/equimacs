@@ -41,6 +41,7 @@ public sealed interface Request {
 
     // --- Project Config ---
     record GetClasspath(String project) implements Request {}
+    record SetClasspath(String project, String action, String kind, String path, String sourceAttachment) implements Request {}
     record GetProjectDescription(String project) implements Request {}
     record RefreshProject(String project) implements Request {}
 
@@ -68,6 +69,7 @@ public sealed interface Request {
     }
     record ReplyToComment(String commentId, String author, String text) implements Request {}
     record ResolveComment(String commentId) implements Request {}
+    record RemoveReviewComment(String commentId) implements Request {}
     record ReviewDiagnostics(String file) implements Request {}
     record EclipseWorkbench() implements Request {}
     record EclipseEditorDiagnostics() implements Request {}
@@ -130,8 +132,24 @@ public sealed interface Request {
         int depth,
         Boolean hideJdk,
         String viewMode,
-        String viewId
-    ) implements Request {}
+        String viewId,
+        String groupBy,
+        int maxFanout,
+        String compareFile,
+        int compareOffset
+    ) implements Request {
+        public OpenCallExplorer(
+            String file,
+            int offset,
+            String direction,
+            int depth,
+            Boolean hideJdk,
+            String viewMode,
+            String viewId
+        ) {
+            this(file, offset, direction, depth, hideJdk, viewMode, viewId, null, 0, null, -1);
+        }
+    }
     record OpenTraceView(int limit, Boolean live, String viewId) implements Request {}
     record OpenJUnitView(String runId, Boolean failuresOnly, Boolean live, String viewId) implements Request {}
 

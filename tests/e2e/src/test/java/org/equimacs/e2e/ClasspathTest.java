@@ -44,6 +44,33 @@ class ClasspathTest {
         assertTrue(hasEntry(entries, "container", "org.eclipse.jdt.launching.JRE_CONTAINER"), result::toString);
     }
 
+    @Test
+    void setClasspathAddsAndRemovesSourceEntry() throws Exception {
+        java.nio.file.Path extraSrc = harness.workspace().resolve("hello-java/extra-src");
+        java.nio.file.Files.createDirectories(extraSrc);
+        harness.rpc().request(new Request.RefreshProject("hello-java"));
+
+        JsonObject added = harness.rpc().request(
+            new Request.SetClasspath("hello-java", "add", "source", "/hello-java/extra-src", null));
+        assertTrue(added.has("result"), added::toString);
+        JsonObject addResult = added.getAsJsonObject("result");
+        assertTrue(addResult.get("changed").getAsBoolean(), addResult::toString);
+        assertTrue(hasEntry(addResult.getAsJsonArray("entries"), "source", "/hello-java/extra-src"), addResult::toString);
+
+        // Idempotent second add reports changed=false
+        JsonObject secondAdd = harness.rpc().request(
+            new Request.SetClasspath("hello-java", "add", "source", "/hello-java/extra-src", null));
+        assertTrue(secondAdd.has("result"), secondAdd::toString);
+        assertEquals(false, secondAdd.getAsJsonObject("result").get("changed").getAsBoolean());
+
+        JsonObject removed = harness.rpc().request(
+            new Request.SetClasspath("hello-java", "remove", "source", "/hello-java/extra-src", null));
+        assertTrue(removed.has("result"), removed::toString);
+        JsonObject removeResult = removed.getAsJsonObject("result");
+        assertTrue(removeResult.get("changed").getAsBoolean(), removeResult::toString);
+        assertEquals(false, hasEntry(removeResult.getAsJsonArray("entries"), "source", "/hello-java/extra-src"));
+    }
+
     private static boolean hasEntry(JsonArray entries, String kind, String path) {
         for (JsonElement element : entries) {
             JsonObject entry = element.getAsJsonObject();

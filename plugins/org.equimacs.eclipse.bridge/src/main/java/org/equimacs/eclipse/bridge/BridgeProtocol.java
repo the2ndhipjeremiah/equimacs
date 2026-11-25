@@ -71,6 +71,7 @@ public final class BridgeProtocol {
             case "GetQuickFixes" -> Request.GetQuickFixes.class;
             case "ApplyFix" -> Request.ApplyFix.class;
             case "GetClasspath" -> Request.GetClasspath.class;
+            case "SetClasspath" -> Request.SetClasspath.class;
             case "GetProjectDescription" -> Request.GetProjectDescription.class;
             case "RefreshProject" -> Request.RefreshProject.class;
             case "PrepareRenameSymbol" -> Request.PrepareRenameSymbol.class;
@@ -86,6 +87,7 @@ public final class BridgeProtocol {
             case "ListReviewComments" -> Request.ListReviewComments.class;
             case "ReplyToComment" -> Request.ReplyToComment.class;
             case "ResolveComment" -> Request.ResolveComment.class;
+            case "RemoveReviewComment" -> Request.RemoveReviewComment.class;
             case "ReviewDiagnostics" -> Request.ReviewDiagnostics.class;
             case "EclipseWorkbench" -> Request.EclipseWorkbench.class;
             case "EclipseEditorDiagnostics" -> Request.EclipseEditorDiagnostics.class;

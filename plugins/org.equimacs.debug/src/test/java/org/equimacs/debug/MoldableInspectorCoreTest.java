@@ -32,6 +32,8 @@ class MoldableInspectorCoreTest {
         data.put("line", 42);
         data.put("variables", List.of(
             Map.of("name", "items", "type", "java.util.ArrayList", "value", "[a, b]"),
+            Map.of("name", "no method return value", "type", "null", "value", "null"),
+            Map.of("name", "compute() returned", "type", "int", "value", "7"),
             Map.of("name", "total", "type", "int", "value", "2")));
 
         InspectContext ctx = new InspectContext(
@@ -65,12 +67,17 @@ class MoldableInspectorCoreTest {
 
         JsonObject varsTab = tabs.get(1).getAsJsonObject().getAsJsonObject("content");
         assertEquals("table", varsTab.get("kind").getAsString());
-        JsonObject firstRow = varsTab.getAsJsonArray("rows").get(0).getAsJsonObject();
+        JsonArray varRows = varsTab.getAsJsonArray("rows");
+        assertEquals(3, varRows.size());
+        JsonObject firstRow = varRows.get(0).getAsJsonObject();
         JsonObject inspectVar = firstRow.getAsJsonObject("onActivate");
         assertEquals("inspect", inspectVar.get("type").getAsString());
         assertEquals("jdi-value", inspectVar.get("targetKind").getAsString());
         assertEquals(101L, inspectVar.get("frameId").getAsLong());
         assertEquals("items", inspectVar.get("expression").getAsString());
+        JsonObject syntheticReturnRow = varRows.get(1).getAsJsonObject();
+        assertEquals("compute() returned", syntheticReturnRow.getAsJsonArray("cells").get(0).getAsString());
+        assertFalse(syntheticReturnRow.has("onActivate"));
 
         JsonObject evalTab = tabs.get(2).getAsJsonObject().getAsJsonObject("content");
         assertEquals("form", evalTab.get("kind").getAsString());

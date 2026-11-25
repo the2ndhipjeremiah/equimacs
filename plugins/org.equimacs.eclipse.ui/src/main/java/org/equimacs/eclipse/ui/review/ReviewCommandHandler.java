@@ -247,6 +247,12 @@ public final class ReviewCommandHandler implements IBridgeCommandHandler {
                 triggerViewRefresh();
                 yield updated;
             }
+            case Request.RemoveReviewComment r -> {
+                ReviewComment removed = store.remove(r.commentId());
+                ReviewMarkerManager.remove(r.commentId());
+                triggerViewRefresh();
+                yield removed;
+            }
             case Request.ReviewDiagnostics r -> reviewDiagnostics(r.file());
             case Request.EclipseWorkbench _ -> eclipseWorkbench();
             case Request.EclipseEditorDiagnostics _ -> eclipseEditorDiagnostics();

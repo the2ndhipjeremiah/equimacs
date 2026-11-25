@@ -102,6 +102,10 @@ public class ReviewStore {
         return CORE.setResolved(commentId, resolved);
     }
 
+    public ReviewComment remove(String commentId) throws IOException {
+        return CORE.remove(commentId);
+    }
+
     public List<ReviewComment> list(String file) throws IOException {
         return CORE.list(file);
     }

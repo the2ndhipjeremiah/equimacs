@@ -153,7 +153,11 @@ public final class ViewActionDispatcher {
                     parseInt(params.get("depth"), 3),
                     parseBool(params.get("hideJdk"), Boolean.TRUE),
                     param(params, "viewMode", "hybrid"),
-                    param(params, "viewId", null)));
+                    param(params, "viewId", null),
+                    param(params, "groupBy", null),
+                    parseInt(params.get("maxFanout"), 0),
+                    param(params, "compareFile", null),
+                    parseInt(params.get("compareOffset"), -1)));
                 logIfError("OpenCallExplorer", res);
             }
             case "trace" -> {

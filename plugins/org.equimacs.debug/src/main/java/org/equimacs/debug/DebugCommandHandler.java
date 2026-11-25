@@ -120,6 +120,8 @@ public final class DebugCommandHandler implements IBridgeCommandHandler {
             case Request.GetQuickFixes q -> c.getQuickFixes(q.file(), q.line());
             case Request.ApplyFix a -> c.applyFix(a.file(), a.line(), a.fixIndex());
             case Request.GetClasspath cp -> c.getClasspath(cp.project());
+            case Request.SetClasspath scp -> c.setClasspath(
+                scp.project(), scp.action(), scp.kind(), scp.path(), scp.sourceAttachment());
             case Request.GetProjectDescription d -> c.getProjectDescription(d.project());
             case Request.RefreshProject r -> c.refreshProject(r.project());
             case Request.PrepareRenameSymbol r -> c.prepareRenameSymbol(r.file(), r.offset(), r.newName());

@@ -204,6 +204,14 @@ public class ReviewView extends ViewPart {
                 };
                 manager.add(resolveAction);
 
+                Action removeAction = new Action("Remove Thread") {
+                    @Override
+                    public void run() {
+                        removeSelected();
+                    }
+                };
+                manager.add(removeAction);
+
                 Action copyIdAction = new Action("Copy Thread ID") {
                     @Override
                     public void run() {
@@ -608,6 +616,19 @@ public class ReviewView extends ViewPart {
                 ReviewMarkerManager.add(updated);
             }
             reload(updated.id());
+        } catch (Exception e) {
+            // Best-effort
+        }
+    }
+
+    private void removeSelected() {
+        ReviewComment current = findCommentById(selectedCommentId);
+        if (current == null) return;
+
+        try {
+            store.remove(current.id());
+            ReviewMarkerManager.remove(current.id());
+            reload(null);
         } catch (Exception e) {
             // Best-effort
         }

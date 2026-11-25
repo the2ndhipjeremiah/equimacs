@@ -288,6 +288,11 @@ class ReviewCoreTest {
         ReviewComment resolved = store.resolve("legacy-1");
         assertTrue(resolved.resolved());
         assertNull(resolved.anchor());
+
+        ReviewComment removed = store.remove("legacy-1");
+        assertEquals("legacy-1", removed.id());
+        assertTrue(store.list(null).isEmpty());
+        assertThrows(IllegalArgumentException.class, () -> store.remove("legacy-1"));
     }
 
     @Test
